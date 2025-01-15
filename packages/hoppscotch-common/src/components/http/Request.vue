@@ -1,9 +1,9 @@
 <template>
   <div
-    class="sticky top-0 z-20 flex-none flex-shrink-0 p-4 overflow-x-auto sm:flex sm:flex-shrink-0 sm:space-x-2 bg-primary"
+    class="sticky top-0 z-20 flex-none flex-shrink-0 bg-primary p-4 sm:flex sm:flex-shrink-0 sm:space-x-2"
   >
     <div
-      class="flex flex-1 border rounded min-w-52 border-divider whitespace-nowrap"
+      class="min-w-[12rem] flex flex-1 whitespace-nowrap rounded border border-divider"
     >
       <div class="relative flex">
         <label for="method">
@@ -13,16 +13,16 @@
             theme="popover"
             :on-shown="() => methodTippyActions.focus()"
           >
-            <span class="select-wrapper">
+            <HoppSmartSelectWrapper>
               <input
                 id="method"
-                class="flex px-4 py-2 font-semibold transition rounded-l cursor-pointer text-secondaryDark w-26 bg-primaryLight"
+                class="flex w-26 cursor-pointer rounded-l bg-primaryLight px-4 py-2 font-semibold text-secondaryDark transition"
                 :value="tab.document.request.method"
                 :readonly="!isCustomMethod"
                 :placeholder="`${t('request.method')}`"
                 @input="onSelectMethod($event)"
               />
-            </span>
+            </HoppSmartSelectWrapper>
             <template #content="{ hide }">
               <div
                 ref="methodTippyActions"
@@ -34,6 +34,9 @@
                   v-for="(method, index) in methods"
                   :key="`method-${index}`"
                   :label="method"
+                  :style="{
+                    color: getMethodLabelColor(method),
+                  }"
                   @click="
                     () => {
                       updateMethod(method)
@@ -47,24 +50,31 @@
         </label>
       </div>
       <div
-        class="flex flex-1 overflow-auto transition border-l rounded-r border-divider bg-primaryLight whitespace-nowrap"
+        class="flex flex-1 whitespace-nowrap rounded-r border-l border-divider bg-primaryLight transition"
       >
         <SmartEnvInput
           v-model="tab.document.request.endpoint"
-          :placeholder="`${t('request.url')}`"
-          @enter="newSendRequest()"
+          :placeholder="`${t('request.url_placeholder')}`"
+          :auto-complete-source="userHistories"
+          :auto-complete-env="true"
+          :inspection-results="tabResults"
           @paste="onPasteUrl($event)"
+          @enter="newSendRequest"
         />
       </div>
     </div>
-    <div class="flex mt-2 sm:mt-0">
+    <div class="mt-2 flex sm:mt-0">
       <HoppButtonPrimary
         id="send"
         v-tippy="{ theme: 'tooltip', delay: [500, 20], allowHTML: true }"
-        :title="`${t('action.send')} <kbd>${getSpecialKey()}</kbd><kbd>↩</kbd>`"
-        :label="`${!loading ? t('action.send') : t('action.cancel')}`"
-        class="flex-1 rounded-r-none min-w-20"
-        @click="!loading ? newSendRequest() : cancelRequest()"
+        :title="`${t(
+          'action.send'
+        )} <kbd>${getSpecialKey()}</kbd><kbd>↩</kbd>`"
+        :label="`${
+          !isTabResponseLoading ? t('action.send') : t('action.cancel')
+        }`"
+        class="min-w-[5rem] flex-1 rounded-r-none"
+        @click="!isTabResponseLoading ? newSendRequest() : cancelRequest()"
       />
       <span class="flex">
         <tippy
@@ -130,7 +140,7 @@
           </template>
         </tippy>
       </span>
-      <span class="flex ml-2 transition border rounded border-divider">
+      <span class="ml-2 flex rounded border border-divider transition">
         <HoppButtonSecondary
           v-tippy="{ theme: 'tooltip', delay: [500, 20], allowHTML: true }"
           :title="`${t(
@@ -170,26 +180,9 @@
                   name="request-name"
                   type="text"
                   autocomplete="off"
-                  class="mb-2 input !bg-primaryContrast"
+                  class="input mb-2 !bg-primaryContrast"
                   @keyup.enter="hide()"
                 />
-                <HoppSmartItem
-                  ref="copyRequestAction"
-                  :label="shareButtonText"
-                  :icon="copyLinkIcon"
-                  :loading="fetchingShareLink"
-                  @click="
-                    () => {
-                      copyRequest()
-                    }
-                  "
-                />
-                <HoppSmartItem
-                  :icon="IconLink2"
-                  :label="`${t('request.view_my_links')}`"
-                  to="/profile"
-                />
-                <hr />
                 <HoppSmartItem
                   ref="saveRequestAction"
                   :label="`${t('request.save_as')}`"
@@ -197,6 +190,19 @@
                   @click="
                     () => {
                       showSaveRequestModal = true
+                      hide()
+                    }
+                  "
+                />
+                <hr />
+                <HoppSmartItem
+                  ref="copyRequestAction"
+                  :label="t('request.share_request')"
+                  :icon="IconShare2"
+                  :loading="fetchingShareLink"
+                  @click="
+                    () => {
+                      shareRequest()
                       hide()
                     }
                   "
@@ -213,6 +219,7 @@
       @hide-modal="showCurlImportModal = false"
     />
     <HttpCodegenModal
+      v-if="showCodegenModal"
       :show="showCodegenModal"
       @hide-modal="showCodegenModal = false"
     />
@@ -220,6 +227,7 @@
       v-if="showSaveRequestModal"
       mode="rest"
       :show="showSaveRequestModal"
+      :request="request"
       @hide-modal="showSaveRequestModal = false"
     />
   </div>
@@ -228,41 +236,40 @@
 <script setup lang="ts">
 import { useI18n } from "@composables/i18n"
 import { useSetting } from "@composables/settings"
-import { useStreamSubscriber } from "@composables/stream"
+import { useReadonlyStream, useStreamSubscriber } from "@composables/stream"
 import { useToast } from "@composables/toast"
-import { refAutoReset, useVModel } from "@vueuse/core"
+import { useVModel } from "@vueuse/core"
 import * as E from "fp-ts/Either"
-import { isLeft, isRight } from "fp-ts/lib/Either"
-import { computed, onBeforeUnmount, ref } from "vue"
-import { defineActionHandler } from "~/helpers/actions"
+import { computed, ref, onUnmounted } from "vue"
+import { defineActionHandler, invokeAction } from "~/helpers/actions"
 import { runMutation } from "~/helpers/backend/GQLClient"
 import { UpdateRequestDocument } from "~/helpers/backend/graphql"
-import { createShortcode } from "~/helpers/backend/mutations/Shortcode"
 import { getPlatformSpecialKey as getSpecialKey } from "~/helpers/platformutils"
-import {
-  cancelRunningExtensionRequest,
-  hasExtensionInstalled,
-} from "~/helpers/strategies/ExtensionStrategy"
 import { runRESTRequest$ } from "~/helpers/RequestRunner"
 import { HoppRESTResponse } from "~/helpers/types/HoppRESTResponse"
-import { copyToClipboard } from "~/helpers/utils/clipboard"
 import { editRESTRequest } from "~/newstore/collections"
-import IconCheck from "~icons/lucide/check"
 import IconChevronDown from "~icons/lucide/chevron-down"
 import IconCode2 from "~icons/lucide/code-2"
-import IconCopy from "~icons/lucide/copy"
 import IconFileCode from "~icons/lucide/file-code"
 import IconFolderPlus from "~icons/lucide/folder-plus"
-import IconLink2 from "~icons/lucide/link-2"
 import IconRotateCCW from "~icons/lucide/rotate-ccw"
 import IconSave from "~icons/lucide/save"
 import IconShare2 from "~icons/lucide/share-2"
-import { HoppRESTTab } from "~/helpers/rest/tab"
 import { getDefaultRESTRequest } from "~/helpers/rest/default"
+import { RESTHistoryEntry, restHistory$ } from "~/newstore/history"
 import { platform } from "~/platform"
-import { getCurrentStrategyID } from "~/helpers/network"
+import { HoppRESTRequest } from "@hoppscotch/data"
+import { useService } from "dioc/vue"
+import { InspectionService } from "~/services/inspection"
+import { InterceptorService } from "~/services/interceptor.service"
+import { HoppTab } from "~/services/tab"
+import { HoppRequestDocument } from "~/helpers/rest/document"
+import { RESTTabService } from "~/services/tab/rest"
+import { getMethodLabelColor } from "~/helpers/rest/labelColoring"
+import { WorkspaceService } from "~/services/workspace.service"
 
 const t = useI18n()
+const interceptorService = useService(InterceptorService)
 
 const methods = [
   "GET",
@@ -271,8 +278,8 @@ const methods = [
   "PATCH",
   "DELETE",
   "HEAD",
-  "CONNECT",
   "OPTIONS",
+  "CONNECT",
   "TRACE",
   "CUSTOM",
 ]
@@ -281,7 +288,7 @@ const toast = useToast()
 
 const { subscribeToStream } = useStreamSubscriber()
 
-const props = defineProps<{ modelValue: HoppRESTTab }>()
+const props = defineProps<{ modelValue: HoppTab<HoppRequestDocument> }>()
 const emit = defineEmits(["update:modelValue"])
 
 const tab = useVModel(props, "modelValue", emit)
@@ -297,11 +304,13 @@ const curlText = ref("")
 
 const loading = ref(false)
 
+const isTabResponseLoading = computed(
+  () => tab.value.document.response?.type === "loading"
+)
+
 const showCurlImportModal = ref(false)
 const showCodegenModal = ref(false)
 const showSaveRequestModal = ref(false)
-
-const hasNavigatorShare = !!navigator.share
 
 // Template refs
 const methodTippyActions = ref<any | null>(null)
@@ -312,6 +321,18 @@ const show = ref<any | null>(null)
 const clearAll = ref<any | null>(null)
 const copyRequestAction = ref<any | null>(null)
 const saveRequestAction = ref<any | null>(null)
+
+const history = useReadonlyStream<RESTHistoryEntry[]>(restHistory$, [])
+
+const userHistories = computed(() => {
+  return history.value.map((history) => history.request.endpoint).slice(0, 10)
+})
+
+const inspectionService = useService(InspectionService)
+
+const tabs = useService(RESTTabService)
+
+const workspaceService = useService(WorkspaceService)
 
 const newSendRequest = async () => {
   if (newEndpoint.value === "" || /^\s+$/.test(newEndpoint.value)) {
@@ -324,15 +345,19 @@ const newSendRequest = async () => {
   loading.value = true
 
   // Log the request run into analytics
-  platform.analytics?.logHoppRequestRunToAnalytics({
+  platform.analytics?.logEvent({
+    type: "HOPP_REQUEST_RUN",
     platform: "rest",
-    strategy: getCurrentStrategyID(),
+    strategy: interceptorService.currentInterceptorID.value!,
+    workspaceType: workspaceService.currentWorkspace.value.type,
   })
 
-  // Double calling is because the function returns a TaskEither than should be executed
-  const streamResult = await runRESTRequest$(tab)()
+  const [cancel, streamPromise] = runRESTRequest$(tab)
+  const streamResult = await streamPromise
 
-  if (isRight(streamResult)) {
+  tab.value.document.cancelFunction = cancel
+
+  if (E.isRight(streamResult)) {
     subscribeToStream(
       streamResult.right,
       (responseState) => {
@@ -346,10 +371,24 @@ const newSendRequest = async () => {
         loading.value = false
       },
       () => {
+        // TODO: Change this any to a proper type
+        const result = (streamResult.right as any).value
+        if (
+          result.type === "network_fail" &&
+          result.error?.error === "NO_PW_EXT_HOOK"
+        ) {
+          const errorResponse: HoppRESTResponse = {
+            type: "extension_error",
+            error: result.error.humanMessage.heading,
+            component: result.error.component,
+            req: result.req,
+          }
+          updateRESTResponse(errorResponse)
+        }
         loading.value = false
       }
     )
-  } else if (isLeft(streamResult)) {
+  } else {
     loading.value = false
     toast.error(`${t("error.script_fail")}`)
     let error: Error
@@ -366,17 +405,14 @@ const newSendRequest = async () => {
 }
 
 const ensureMethodInEndpoint = () => {
-  if (
-    !/^http[s]?:\/\//.test(newEndpoint.value) &&
-    !newEndpoint.value.startsWith("<<")
-  ) {
-    const domain = newEndpoint.value.split(/[/:#?]+/)[0]
+  const endpoint = newEndpoint.value.trim()
+  tab.value.document.request.endpoint = endpoint
+  if (!/^http[s]?:\/\//.test(endpoint) && !endpoint.startsWith("<<")) {
+    const domain = endpoint.split(/[/:#?]+/)[0]
     if (domain === "localhost" || /([0-9]+\.)*[0-9]/.test(domain)) {
-      tab.value.document.request.endpoint =
-        "http://" + tab.value.document.request.endpoint
+      tab.value.document.request.endpoint = "http://" + endpoint
     } else {
-      tab.value.document.request.endpoint =
-        "https://" + tab.value.document.request.endpoint
+      tab.value.document.request.endpoint = "https://" + endpoint
     }
   }
 }
@@ -397,11 +433,21 @@ function isCURL(curl: string) {
   return curl.includes("curl ")
 }
 
+const currentTabID = tabs.currentTabID.value
+
+onUnmounted(() => {
+  //check if current tab id exist in the current tab id lists
+  const isCurrentTabRemoved = !tabs
+    .getActiveTabs()
+    .value.some((tab) => tab.id === currentTabID)
+
+  if (isCurrentTabRemoved) cancelRequest()
+})
+
 const cancelRequest = () => {
   loading.value = false
-  if (hasExtensionInstalled()) {
-    cancelRunningExtensionRequest()
-  }
+  tab.value.document.cancelFunction?.()
+
   updateRESTResponse(null)
 }
 
@@ -411,7 +457,7 @@ const updateMethod = (method: string) => {
 
 const onSelectMethod = (e: Event | any) => {
   // type any because of value property not being recognized by TS in the event.target object. It is a valid property though.
-  updateMethod(e.value)
+  updateMethod(e.target.value)
 }
 
 const clearContent = () => {
@@ -419,60 +465,23 @@ const clearContent = () => {
 }
 
 const updateRESTResponse = (response: HoppRESTResponse | null) => {
-  tab.value.response = response
+  tab.value.document.response = response
 }
 
-const copyLinkIcon = refAutoReset<
-  typeof IconShare2 | typeof IconCopy | typeof IconCheck
->(hasNavigatorShare ? IconShare2 : IconCopy, 1000)
+const currentUser = useReadonlyStream(
+  platform.auth.getCurrentUserStream(),
+  platform.auth.getCurrentUser()
+)
 
-const shareLink = ref<string | null>("")
 const fetchingShareLink = ref(false)
 
-const shareButtonText = computed(() => {
-  if (shareLink.value) {
-    return shareLink.value
-  } else if (fetchingShareLink.value) {
-    return t("state.loading")
-  } else {
-    return t("request.copy_link")
-  }
-})
-
-const copyRequest = async () => {
-  if (shareLink.value) {
-    copyShareLink(shareLink.value)
-  } else {
-    shareLink.value = ""
-    fetchingShareLink.value = true
-    const shortcodeResult = await createShortcode(tab.value.document.request)()
-    if (E.isLeft(shortcodeResult)) {
-      toast.error(`${shortcodeResult.left.error}`)
-      shareLink.value = `${t("error.something_went_wrong")}`
-    } else if (E.isRight(shortcodeResult)) {
-      shareLink.value = `/${shortcodeResult.right.createShortcode.id}`
-      copyShareLink(shareLink.value)
-    }
-    fetchingShareLink.value = false
-  }
-}
-
-const copyShareLink = (shareLink: string) => {
-  const link = `${
-    import.meta.env.VITE_SHORTCODE_BASE_URL ?? "https://hopp.sh"
-  }/r${shareLink}`
-  if (navigator.share) {
-    const time = new Date().toLocaleTimeString()
-    const date = new Date().toLocaleDateString()
-    navigator.share({
-      title: "Hoppscotch",
-      text: `Hoppscotch • Open source API development ecosystem at ${time} on ${date}`,
-      url: link,
+const shareRequest = () => {
+  if (currentUser.value) {
+    invokeAction("share.request", {
+      request: tab.value.document.request,
     })
   } else {
-    copyLinkIcon.value = IconCheck
-    copyToClipboard(link)
-    toast.success(`${t("state.copied_to_clipboard")}`)
+    invokeAction("modals.login.toggle")
   }
 }
 
@@ -516,6 +525,14 @@ const saveRequest = () => {
       editRESTRequest(saveCtx.folderPath, saveCtx.requestIndex, req)
 
       tab.value.document.isDirty = false
+
+      platform.analytics?.logEvent({
+        type: "HOPP_SAVE_REQUEST",
+        platform: "rest",
+        createdNow: false,
+        workspaceType: "personal",
+      })
+
       toast.success(`${t("request.saved")}`)
     } catch (e) {
       tab.value.document.saveContext = undefined
@@ -526,6 +543,13 @@ const saveRequest = () => {
 
     // TODO: handle error case (NOTE: overwriteRequestTeams is async)
     try {
+      platform.analytics?.logEvent({
+        type: "HOPP_SAVE_REQUEST",
+        platform: "rest",
+        createdNow: false,
+        workspaceType: "team",
+      })
+
       runMutation(UpdateRequestDocument, {
         requestID: saveCtx.requestID,
         data: {
@@ -549,28 +573,35 @@ const saveRequest = () => {
   }
 }
 
-onBeforeUnmount(() => {
-  if (loading.value) cancelRequest()
-})
+const request = ref<HoppRESTRequest | null>(null)
 
 defineActionHandler("request.send-cancel", () => {
   if (!loading.value) newSendRequest()
   else cancelRequest()
 })
 defineActionHandler("request.reset", clearContent)
-defineActionHandler("request.copy-link", copyRequest)
+defineActionHandler("request.share-request", shareRequest)
 defineActionHandler("request.method.next", cycleDownMethod)
 defineActionHandler("request.method.prev", cycleUpMethod)
-defineActionHandler("request.save", saveRequest)
-defineActionHandler(
-  "request.save-as",
-  () => (showSaveRequestModal.value = true)
-)
+defineActionHandler("request-response.save", saveRequest)
+defineActionHandler("request.save-as", (req) => {
+  showSaveRequestModal.value = true
+  if (req?.requestType === "rest" && req.request) {
+    request.value = req.request
+  }
+})
 defineActionHandler("request.method.get", () => updateMethod("GET"))
 defineActionHandler("request.method.post", () => updateMethod("POST"))
 defineActionHandler("request.method.put", () => updateMethod("PUT"))
 defineActionHandler("request.method.delete", () => updateMethod("DELETE"))
 defineActionHandler("request.method.head", () => updateMethod("HEAD"))
+
+defineActionHandler("request.import-curl", () => {
+  showCurlImportModal.value = true
+})
+defineActionHandler("request.show-code", () => {
+  showCodegenModal.value = true
+})
 
 const isCustomMethod = computed(() => {
   return (
@@ -580,4 +611,6 @@ const isCustomMethod = computed(() => {
 })
 
 const COLUMN_LAYOUT = useSetting("COLUMN_LAYOUT")
+
+const tabResults = inspectionService.getResultViewFor(tabs.currentTabID.value)
 </script>

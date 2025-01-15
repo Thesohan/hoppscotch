@@ -69,7 +69,7 @@ export class SIOConnection {
           },
         })
       } else {
-        this.socket.connect(url)
+        this.socket.connect(url, { path })
       }
 
       this.socket.on("connect", () => {
@@ -113,7 +113,8 @@ export class SIOConnection {
       this.handleError(error, "CONNECTION")
     }
 
-    platform.analytics?.logHoppRequestRunToAnalytics({
+    platform.analytics?.logEvent({
+      type: "HOPP_REQUEST_RUN",
       platform: "socketio",
     })
   }

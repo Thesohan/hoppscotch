@@ -1,10 +1,11 @@
-import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { DateTime } from 'luxon';
-import { AuthError } from 'src/types/AuthError';
 import { AuthTokens } from 'src/types/AuthTokens';
 import { Response } from 'express';
 import * as cookie from 'cookie';
-import { COOKIES_NOT_FOUND } from 'src/errors';
+import { AUTH_PROVIDER_NOT_SPECIFIED, COOKIES_NOT_FOUND } from 'src/errors';
+import { throwErr } from 'src/utils';
+import { ConfigService } from '@nestjs/config';
 
 enum AuthTokenType {
   ACCESS_TOKEN = 'access_token',
@@ -16,13 +17,11 @@ export enum Origin {
   APP = 'app',
 }
 
-/**
- * This function allows throw to be used as an expression
- * @param errMessage Message present in the error message
- */
-export function throwHTTPErr(errorData: AuthError): never {
-  const { message, statusCode } = errorData;
-  throw new HttpException(message, statusCode);
+export enum AuthProvider {
+  GOOGLE = 'GOOGLE',
+  GITHUB = 'GITHUB',
+  MICROSOFT = 'MICROSOFT',
+  EMAIL = 'EMAIL',
 }
 
 /**
@@ -37,27 +36,29 @@ export const authCookieHandler = (
   redirect: boolean,
   redirectUrl: string | null,
 ) => {
+  const configService = new ConfigService();
+
   const currentTime = DateTime.now();
   const accessTokenValidity = currentTime
     .plus({
-      milliseconds: parseInt(process.env.ACCESS_TOKEN_VALIDITY),
+      milliseconds: parseInt(configService.get('ACCESS_TOKEN_VALIDITY')),
     })
     .toMillis();
   const refreshTokenValidity = currentTime
     .plus({
-      milliseconds: parseInt(process.env.REFRESH_TOKEN_VALIDITY),
+      milliseconds: parseInt(configService.get('REFRESH_TOKEN_VALIDITY')),
     })
     .toMillis();
 
   res.cookie(AuthTokenType.ACCESS_TOKEN, authTokens.access_token, {
     httpOnly: true,
-    secure: true,
+    secure: configService.get('ALLOW_SECURE_COOKIES') === 'true',
     sameSite: 'lax',
     maxAge: accessTokenValidity,
   });
   res.cookie(AuthTokenType.REFRESH_TOKEN, authTokens.refresh_token, {
     httpOnly: true,
-    secure: true,
+    secure: configService.get('ALLOW_SECURE_COOKIES') === 'true',
     sameSite: 'lax',
     maxAge: refreshTokenValidity,
   });
@@ -67,10 +68,12 @@ export const authCookieHandler = (
   }
 
   // check to see if redirectUrl is a whitelisted url
-  const whitelistedOrigins = process.env.WHITELISTED_ORIGINS.split(',');
+  const whitelistedOrigins = configService
+    .get('WHITELISTED_ORIGINS')
+    .split(',');
   if (!whitelistedOrigins.includes(redirectUrl))
     // if it is not redirect by default to REDIRECT_URL
-    redirectUrl = process.env.REDIRECT_URL;
+    redirectUrl = configService.get('REDIRECT_URL');
 
   return res.status(HttpStatus.OK).redirect(redirectUrl);
 };
@@ -97,3 +100,28 @@ export const subscriptionContextCookieParser = (rawCookies: string) => {
     refresh_token: cookies[AuthTokenType.REFRESH_TOKEN],
   };
 };
+
+/**
+ * Check to see if given auth provider is present in the VITE_ALLOWED_AUTH_PROVIDERS env variable
+ *
+ * @param provider Provider we want to check the presence of
+ * @returns Boolean if provider specified is present or not
+ */
+export function authProviderCheck(
+  provider: string,
+  VITE_ALLOWED_AUTH_PROVIDERS: string,
+) {
+  if (!provider) {
+    throwErr(AUTH_PROVIDER_NOT_SPECIFIED);
+  }
+
+  const envVariables = VITE_ALLOWED_AUTH_PROVIDERS
+    ? VITE_ALLOWED_AUTH_PROVIDERS.split(',').map((provider) =>
+        provider.trim().toUpperCase(),
+      )
+    : [];
+
+  if (!envVariables.includes(provider.toUpperCase())) return false;
+
+  return true;
+}

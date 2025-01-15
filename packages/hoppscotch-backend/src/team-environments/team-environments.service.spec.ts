@@ -2,19 +2,28 @@ import { mockDeep, mockReset } from 'jest-mock-extended';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { TeamEnvironment } from './team-environments.model';
 import { TeamEnvironmentsService } from './team-environments.service';
-import { TEAM_ENVIRONMENT_NOT_FOUND } from 'src/errors';
+import {
+  JSON_INVALID,
+  TEAM_ENVIRONMENT_NOT_FOUND,
+  TEAM_ENVIRONMENT_SHORT_NAME,
+  TEAM_MEMBER_NOT_FOUND,
+} from 'src/errors';
+import { TeamService } from 'src/team/team.service';
+import { TeamMemberRole } from 'src/team/team.model';
 
 const mockPrisma = mockDeep<PrismaService>();
 
 const mockPubSub = {
   publish: jest.fn().mockResolvedValue(null),
 };
+const mockTeamService = mockDeep<TeamService>();
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 const teamEnvironmentsService = new TeamEnvironmentsService(
   mockPrisma,
   mockPubSub as any,
+  mockTeamService,
 );
 
 const teamEnvironment = {
@@ -31,125 +40,81 @@ beforeEach(() => {
 
 describe('TeamEnvironmentsService', () => {
   describe('getTeamEnvironment', () => {
-    test('queries the db with the id', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockResolvedValue(teamEnvironment);
-
-      await teamEnvironmentsService.getTeamEnvironment('123')();
-
-      expect(mockPrisma.teamEnvironment.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            id: '123',
-          },
-        }),
+    test('should successfully return a TeamEnvironment with valid ID', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockResolvedValueOnce(
+        teamEnvironment,
       );
-    });
 
-    test('requests prisma to reject the query promise if not found', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockResolvedValue(teamEnvironment);
-
-      await teamEnvironmentsService.getTeamEnvironment('123')();
-
-      expect(mockPrisma.teamEnvironment.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          rejectOnNotFound: true,
-        }),
+      const result = await teamEnvironmentsService.getTeamEnvironment(
+        teamEnvironment.id,
       );
+      expect(result).toEqualRight(teamEnvironment);
     });
 
-    test('should return a Some of the correct environment if exists', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockResolvedValue(teamEnvironment);
+    test('should throw TEAM_ENVIRONMENT_NOT_FOUND with invalid ID', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockRejectedValueOnce(
+        'RejectOnNotFound',
+      );
 
-      const result = await teamEnvironmentsService.getTeamEnvironment('123')();
-
-      expect(result).toEqualSome(teamEnvironment);
-    });
-
-    test('should return a None if the environment does not exist', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockRejectedValue('NotFoundError');
-
-      const result = await teamEnvironmentsService.getTeamEnvironment('123')();
-
-      expect(result).toBeNone();
+      const result = await teamEnvironmentsService.getTeamEnvironment(
+        teamEnvironment.id,
+      );
+      expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
     });
   });
+
   describe('createTeamEnvironment', () => {
-    test('should create and return a new team environment given a valid name,variable and team ID', async () => {
+    test('should successfully create and return a new team environment given valid inputs', async () => {
       mockPrisma.teamEnvironment.create.mockResolvedValue(teamEnvironment);
 
       const result = await teamEnvironmentsService.createTeamEnvironment(
         teamEnvironment.name,
         teamEnvironment.teamID,
         JSON.stringify(teamEnvironment.variables),
-      )();
+      );
 
-      expect(result).toEqual(<TeamEnvironment>{
-        id: teamEnvironment.id,
-        name: teamEnvironment.name,
-        teamID: teamEnvironment.teamID,
+      expect(result).toEqualRight({
+        ...teamEnvironment,
         variables: JSON.stringify(teamEnvironment.variables),
       });
     });
 
-    test('should reject if given team ID is invalid', async () => {
-      mockPrisma.teamEnvironment.create.mockRejectedValue(null as any);
+    test('should throw TEAM_ENVIRONMENT_SHORT_NAME if input TeamEnvironment name is invalid', async () => {
+      const result = await teamEnvironmentsService.createTeamEnvironment(
+        '12',
+        teamEnvironment.teamID,
+        JSON.stringify(teamEnvironment.variables),
+      );
 
-      await expect(
-        teamEnvironmentsService.createTeamEnvironment(
-          teamEnvironment.name,
-          'invalidteamid',
-          JSON.stringify(teamEnvironment.variables),
-        ),
-      ).rejects.toBeDefined();
-    });
-
-    test('should reject if provided team environment name is not a string', async () => {
-      mockPrisma.teamEnvironment.create.mockRejectedValue(null as any);
-
-      await expect(
-        teamEnvironmentsService.createTeamEnvironment(
-          null as any,
-          teamEnvironment.teamID,
-          JSON.stringify(teamEnvironment.variables),
-        ),
-      ).rejects.toBeDefined();
-    });
-
-    test('should reject if provided variable is not a string', async () => {
-      mockPrisma.teamEnvironment.create.mockRejectedValue(null as any);
-
-      await expect(
-        teamEnvironmentsService.createTeamEnvironment(
-          teamEnvironment.name,
-          teamEnvironment.teamID,
-          null as any,
-        ),
-      ).rejects.toBeDefined();
+      expect(result).toEqualLeft(TEAM_ENVIRONMENT_SHORT_NAME);
     });
 
     test('should send pubsub message to "team_environment/<teamID>/created" if team environment is created successfully', async () => {
-      mockPrisma.teamEnvironment.create.mockResolvedValueOnce(teamEnvironment);
+      mockPrisma.teamEnvironment.create.mockResolvedValue(teamEnvironment);
 
       const result = await teamEnvironmentsService.createTeamEnvironment(
         teamEnvironment.name,
         teamEnvironment.teamID,
         JSON.stringify(teamEnvironment.variables),
-      )();
+      );
 
       expect(mockPubSub.publish).toHaveBeenCalledWith(
         `team_environment/${teamEnvironment.teamID}/created`,
-        result,
+        {
+          ...teamEnvironment,
+          variables: JSON.stringify(teamEnvironment.variables),
+        },
       );
     });
   });
 
   describe('deleteTeamEnvironment', () => {
-    test('should resolve to true given a valid team environment ID', async () => {
+    test('should successfully delete a TeamEnvironment with a valid ID', async () => {
       mockPrisma.teamEnvironment.delete.mockResolvedValueOnce(teamEnvironment);
 
       const result = await teamEnvironmentsService.deleteTeamEnvironment(
         teamEnvironment.id,
-      )();
+      );
 
       expect(result).toEqualRight(true);
     });
@@ -159,7 +124,7 @@ describe('TeamEnvironmentsService', () => {
 
       const result = await teamEnvironmentsService.deleteTeamEnvironment(
         'invalidid',
-      )();
+      );
 
       expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
     });
@@ -169,7 +134,7 @@ describe('TeamEnvironmentsService', () => {
 
       const result = await teamEnvironmentsService.deleteTeamEnvironment(
         teamEnvironment.id,
-      )();
+      );
 
       expect(mockPubSub.publish).toHaveBeenCalledWith(
         `team_environment/${teamEnvironment.teamID}/deleted`,
@@ -182,7 +147,7 @@ describe('TeamEnvironmentsService', () => {
   });
 
   describe('updateVariablesInTeamEnvironment', () => {
-    test('should add new variable to a team environment', async () => {
+    test('should successfully add new variable to a team environment', async () => {
       mockPrisma.teamEnvironment.update.mockResolvedValueOnce({
         ...teamEnvironment,
         variables: [{ key: 'value' }],
@@ -192,7 +157,7 @@ describe('TeamEnvironmentsService', () => {
         teamEnvironment.id,
         teamEnvironment.name,
         JSON.stringify([{ key: 'value' }]),
-      )();
+      );
 
       expect(result).toEqualRight(<TeamEnvironment>{
         ...teamEnvironment,
@@ -200,7 +165,7 @@ describe('TeamEnvironmentsService', () => {
       });
     });
 
-    test('should add new variable to already existing list of variables in a team environment', async () => {
+    test('should successfully add new variable to already existing list of variables in a team environment', async () => {
       mockPrisma.teamEnvironment.update.mockResolvedValueOnce({
         ...teamEnvironment,
         variables: [{ key: 'value' }, { key_2: 'value_2' }],
@@ -210,7 +175,7 @@ describe('TeamEnvironmentsService', () => {
         teamEnvironment.id,
         teamEnvironment.name,
         JSON.stringify([{ key: 'value' }, { key_2: 'value_2' }]),
-      )();
+      );
 
       expect(result).toEqualRight(<TeamEnvironment>{
         ...teamEnvironment,
@@ -218,7 +183,7 @@ describe('TeamEnvironmentsService', () => {
       });
     });
 
-    test('should edit existing variables in a team environment', async () => {
+    test('should successfully edit existing variables in a team environment', async () => {
       mockPrisma.teamEnvironment.update.mockResolvedValueOnce({
         ...teamEnvironment,
         variables: [{ key: '1234' }],
@@ -228,7 +193,7 @@ describe('TeamEnvironmentsService', () => {
         teamEnvironment.id,
         teamEnvironment.name,
         JSON.stringify([{ key: '1234' }]),
-      )();
+      );
 
       expect(result).toEqualRight(<TeamEnvironment>{
         ...teamEnvironment,
@@ -236,22 +201,7 @@ describe('TeamEnvironmentsService', () => {
       });
     });
 
-    test('should delete existing variable in a team environment', async () => {
-      mockPrisma.teamEnvironment.update.mockResolvedValueOnce(teamEnvironment);
-
-      const result = await teamEnvironmentsService.updateTeamEnvironment(
-        teamEnvironment.id,
-        teamEnvironment.name,
-        JSON.stringify([{}]),
-      )();
-
-      expect(result).toEqualRight(<TeamEnvironment>{
-        ...teamEnvironment,
-        variables: JSON.stringify([{}]),
-      });
-    });
-
-    test('should edit name of an existing team environment', async () => {
+    test('should successfully edit name of an existing team environment', async () => {
       mockPrisma.teamEnvironment.update.mockResolvedValueOnce({
         ...teamEnvironment,
         variables: [{ key: '123' }],
@@ -261,7 +211,7 @@ describe('TeamEnvironmentsService', () => {
         teamEnvironment.id,
         teamEnvironment.name,
         JSON.stringify([{ key: '123' }]),
-      )();
+      );
 
       expect(result).toEqualRight(<TeamEnvironment>{
         ...teamEnvironment,
@@ -269,14 +219,24 @@ describe('TeamEnvironmentsService', () => {
       });
     });
 
-    test('should reject to TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
+    test('should throw TEAM_ENVIRONMENT_SHORT_NAME if input TeamEnvironment name is invalid', async () => {
+      const result = await teamEnvironmentsService.updateTeamEnvironment(
+        teamEnvironment.id,
+        '12',
+        JSON.stringify([{ key: 'value' }]),
+      );
+
+      expect(result).toEqualLeft(TEAM_ENVIRONMENT_SHORT_NAME);
+    });
+
+    test('should throw TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
       mockPrisma.teamEnvironment.update.mockRejectedValue('RecordNotFound');
 
       const result = await teamEnvironmentsService.updateTeamEnvironment(
         'invalidid',
         teamEnvironment.name,
         JSON.stringify(teamEnvironment.variables),
-      )();
+      );
 
       expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
     });
@@ -288,7 +248,7 @@ describe('TeamEnvironmentsService', () => {
         teamEnvironment.id,
         teamEnvironment.name,
         JSON.stringify([{ key: 'value' }]),
-      )();
+      );
 
       expect(mockPubSub.publish).toHaveBeenCalledWith(
         `team_environment/${teamEnvironment.teamID}/updated`,
@@ -301,13 +261,13 @@ describe('TeamEnvironmentsService', () => {
   });
 
   describe('deleteAllVariablesFromTeamEnvironment', () => {
-    test('should delete all variables in a team environment', async () => {
+    test('should successfully delete all variables in a team environment', async () => {
       mockPrisma.teamEnvironment.update.mockResolvedValueOnce(teamEnvironment);
 
       const result =
         await teamEnvironmentsService.deleteAllVariablesFromTeamEnvironment(
           teamEnvironment.id,
-        )();
+        );
 
       expect(result).toEqualRight(<TeamEnvironment>{
         ...teamEnvironment,
@@ -315,13 +275,13 @@ describe('TeamEnvironmentsService', () => {
       });
     });
 
-    test('should reject to TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
+    test('should throw TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
       mockPrisma.teamEnvironment.update.mockRejectedValue('RecordNotFound');
 
       const result =
         await teamEnvironmentsService.deleteAllVariablesFromTeamEnvironment(
           'invalidid',
-        )();
+        );
 
       expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
     });
@@ -332,7 +292,7 @@ describe('TeamEnvironmentsService', () => {
       const result =
         await teamEnvironmentsService.deleteAllVariablesFromTeamEnvironment(
           teamEnvironment.id,
-        )();
+        );
 
       expect(mockPubSub.publish).toHaveBeenCalledWith(
         `team_environment/${teamEnvironment.teamID}/updated`,
@@ -345,56 +305,58 @@ describe('TeamEnvironmentsService', () => {
   });
 
   describe('createDuplicateEnvironment', () => {
-    test('should duplicate an existing team environment', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockResolvedValueOnce(
+    test('should successfully duplicate an existing team environment', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockResolvedValueOnce(
         teamEnvironment,
       );
 
       mockPrisma.teamEnvironment.create.mockResolvedValueOnce({
-        ...teamEnvironment,
         id: 'newid',
+        ...teamEnvironment,
       });
 
       const result = await teamEnvironmentsService.createDuplicateEnvironment(
         teamEnvironment.id,
-      )();
+      );
 
       expect(result).toEqualRight(<TeamEnvironment>{
-        ...teamEnvironment,
         id: 'newid',
+        ...teamEnvironment,
         variables: JSON.stringify(teamEnvironment.variables),
       });
     });
 
-    test('should reject to TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockRejectedValue('NotFoundError');
+    test('should throw TEAM_ENVIRONMMENT_NOT_FOUND if provided id is invalid', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockRejectedValue(
+        'NotFoundError',
+      );
 
       const result = await teamEnvironmentsService.createDuplicateEnvironment(
         teamEnvironment.id,
-      )();
+      );
 
       expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
     });
 
     test('should send pubsub message to "team_environment/<teamID>/created" if team environment is updated successfully', async () => {
-      mockPrisma.teamEnvironment.findFirst.mockResolvedValueOnce(
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockResolvedValueOnce(
         teamEnvironment,
       );
 
       mockPrisma.teamEnvironment.create.mockResolvedValueOnce({
-        ...teamEnvironment,
         id: 'newid',
+        ...teamEnvironment,
       });
 
       const result = await teamEnvironmentsService.createDuplicateEnvironment(
         teamEnvironment.id,
-      )();
+      );
 
       expect(mockPubSub.publish).toHaveBeenCalledWith(
         `team_environment/${teamEnvironment.teamID}/created`,
         {
-          ...teamEnvironment,
           id: 'newid',
+          ...teamEnvironment,
           variables: JSON.stringify([{}]),
         },
       );
@@ -421,6 +383,49 @@ describe('TeamEnvironmentsService', () => {
         },
       });
       expect(result).toEqual(0);
+    });
+  });
+
+  describe('getTeamEnvironmentForCLI', () => {
+    test('should successfully return a TeamEnvironment with valid ID', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockResolvedValueOnce(
+        teamEnvironment,
+      );
+      mockTeamService.getTeamMember.mockResolvedValue({
+        membershipID: 'sdc3sfdv',
+        userUid: '123454',
+        role: TeamMemberRole.OWNER,
+      });
+
+      const result = await teamEnvironmentsService.getTeamEnvironmentForCLI(
+        teamEnvironment.id,
+        '123454',
+      );
+      expect(result).toEqualRight(teamEnvironment);
+    });
+
+    test('should throw TEAM_ENVIRONMENT_NOT_FOUND with invalid ID', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockRejectedValueOnce(
+        'RejectOnNotFound',
+      );
+
+      const result = await teamEnvironmentsService.getTeamEnvironment(
+        teamEnvironment.id,
+      );
+      expect(result).toEqualLeft(TEAM_ENVIRONMENT_NOT_FOUND);
+    });
+
+    test('should throw TEAM_MEMBER_NOT_FOUND if user not in same team', async () => {
+      mockPrisma.teamEnvironment.findFirstOrThrow.mockResolvedValueOnce(
+        teamEnvironment,
+      );
+      mockTeamService.getTeamMember.mockResolvedValue(null);
+
+      const result = await teamEnvironmentsService.getTeamEnvironmentForCLI(
+        teamEnvironment.id,
+        '333',
+      );
+      expect(result).toEqualLeft(TEAM_MEMBER_NOT_FOUND);
     });
   });
 });

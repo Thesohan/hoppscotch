@@ -39,6 +39,7 @@ import {
   UserCollectionRemovedDocument,
   UserCollectionMovedDocument,
   UserCollectionOrderUpdatedDocument,
+  UserCollectionDuplicatedDocument,
   ExportUserCollectionsToJsonQuery,
   ExportUserCollectionsToJsonQueryVariables,
   ExportUserCollectionsToJsonDocument,
@@ -65,24 +66,32 @@ import {
   GetGqlRootUserCollectionsQueryVariables,
   GetGqlRootUserCollectionsDocument,
   ReqType,
+  UpdateUserCollectionMutation,
+  UpdateUserCollectionMutationVariables,
+  UpdateUserCollectionDocument,
+  DuplicateUserCollectionDocument,
+  DuplicateUserCollectionMutation,
+  DuplicateUserCollectionMutationVariables,
 } from "../../api/generated/graphql"
 
-export const createRESTRootUserCollection = (title: string) =>
+export const createRESTRootUserCollection = (title: string, data?: string) =>
   runMutation<
     CreateRestRootUserCollectionMutation,
     CreateRestRootUserCollectionMutationVariables,
     ""
   >(CreateRestRootUserCollectionDocument, {
     title,
+    data,
   })()
 
-export const createGQLRootUserCollection = (title: string) =>
+export const createGQLRootUserCollection = (title: string, data?: string) =>
   runMutation<
     CreateGqlRootUserCollectionMutation,
     CreateGqlRootUserCollectionMutationVariables,
     ""
   >(CreateGqlRootUserCollectionDocument, {
     title,
+    data,
   })()
 
 export const createRESTUserRequest = (
@@ -117,7 +126,8 @@ export const createGQLUserRequest = (
 
 export const createRESTChildUserCollection = (
   title: string,
-  parentUserCollectionID: string
+  parentUserCollectionID: string,
+  data?: string
 ) =>
   runMutation<
     CreateRestChildUserCollectionMutation,
@@ -126,11 +136,13 @@ export const createRESTChildUserCollection = (
   >(CreateRestChildUserCollectionDocument, {
     title,
     parentUserCollectionID,
+    data,
   })()
 
 export const createGQLChildUserCollection = (
   title: string,
-  parentUserCollectionID: string
+  parentUserCollectionID: string,
+  data?: string
 ) =>
   runMutation<
     CreateGqlChildUserCollectionMutation,
@@ -139,6 +151,7 @@ export const createGQLChildUserCollection = (
   >(CreateGqlChildUserCollectionDocument, {
     title,
     parentUserCollectionID,
+    data,
   })()
 
 export const deleteUserCollection = (userCollectionID: string) =>
@@ -160,6 +173,17 @@ export const renameUserCollection = (
     ""
   >(RenameUserCollectionDocument, { userCollectionID, newTitle })()
 
+export const updateUserCollection = (
+  userCollectionID: string,
+  newTitle?: string,
+  data?: string
+) =>
+  runMutation<
+    UpdateUserCollectionMutation,
+    UpdateUserCollectionMutationVariables,
+    ""
+  >(UpdateUserCollectionDocument, { userCollectionID, newTitle, data })()
+
 export const moveUserCollection = (
   sourceCollectionID: string,
   destinationCollectionID?: string
@@ -171,6 +195,19 @@ export const moveUserCollection = (
   >(MoveUserCollectionDocument, {
     userCollectionID: sourceCollectionID,
     destCollectionID: destinationCollectionID,
+  })()
+
+export const duplicateUserCollection = (
+  collectionID: string,
+  reqType: ReqType
+) =>
+  runMutation<
+    DuplicateUserCollectionMutation,
+    DuplicateUserCollectionMutationVariables,
+    ""
+  >(DuplicateUserCollectionDocument, {
+    collectionID,
+    reqType,
   })()
 
 export const editUserRequest = (
@@ -248,6 +285,7 @@ export const getUserRootCollections = () =>
     ""
   >({
     query: GetUserRootCollectionsDocument,
+    variables: {},
   })
 
 export const getGQLRootUserCollections = () =>
@@ -257,6 +295,7 @@ export const getGQLRootUserCollections = () =>
     ""
   >({
     query: GetGqlRootUserCollectionsDocument,
+    variables: {},
   })
 
 export const exportUserCollectionsToJSON = (
@@ -273,30 +312,37 @@ export const exportUserCollectionsToJSON = (
   })
 
 export const runUserCollectionCreatedSubscription = () =>
-  runGQLSubscription({ query: UserCollectionCreatedDocument })
+  runGQLSubscription({ query: UserCollectionCreatedDocument, variables: {} })
 
 export const runUserCollectionUpdatedSubscription = () =>
-  runGQLSubscription({ query: UserCollectionUpdatedDocument })
+  runGQLSubscription({ query: UserCollectionUpdatedDocument, variables: {} })
 
 export const runUserCollectionRemovedSubscription = () =>
-  runGQLSubscription({ query: UserCollectionRemovedDocument })
+  runGQLSubscription({ query: UserCollectionRemovedDocument, variables: {} })
 
 export const runUserCollectionMovedSubscription = () =>
-  runGQLSubscription({ query: UserCollectionMovedDocument })
+  runGQLSubscription({ query: UserCollectionMovedDocument, variables: {} })
 
 export const runUserCollectionOrderUpdatedSubscription = () =>
   runGQLSubscription({
     query: UserCollectionOrderUpdatedDocument,
+    variables: {},
+  })
+
+export const runUserCollectionDuplicatedSubscription = () =>
+  runGQLSubscription({
+    query: UserCollectionDuplicatedDocument,
+    variables: {},
   })
 
 export const runUserRequestCreatedSubscription = () =>
-  runGQLSubscription({ query: UserRequestCreatedDocument })
+  runGQLSubscription({ query: UserRequestCreatedDocument, variables: {} })
 
 export const runUserRequestUpdatedSubscription = () =>
-  runGQLSubscription({ query: UserRequestUpdatedDocument })
+  runGQLSubscription({ query: UserRequestUpdatedDocument, variables: {} })
 
 export const runUserRequestMovedSubscription = () =>
-  runGQLSubscription({ query: UserRequestMovedDocument })
+  runGQLSubscription({ query: UserRequestMovedDocument, variables: {} })
 
 export const runUserRequestDeletedSubscription = () =>
-  runGQLSubscription({ query: UserRequestDeletedDocument })
+  runGQLSubscription({ query: UserRequestDeletedDocument, variables: {} })

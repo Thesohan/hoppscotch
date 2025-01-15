@@ -1,17 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   AdminUserInvitationMailDescription,
   MailDescription,
   UserMagicLinkMailDescription,
 } from './MailDescriptions';
 import { throwErr } from 'src/utils';
-import * as TE from 'fp-ts/TaskEither';
 import { EMAIL_FAILED } from 'src/errors';
 import { MailerService as NestMailerService } from '@nestjs-modules/mailer';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class MailerService {
-  constructor(private readonly nestMailerService: NestMailerService) {}
+  constructor(
+    @Optional() private readonly nestMailerService: NestMailerService,
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * Takes an input mail description and spits out the Email subject required for it
@@ -26,42 +29,25 @@ export class MailerService {
   ): string {
     switch (mailDesc.template) {
       case 'team-invitation':
-        return `${mailDesc.variables.invitee} invited you to join ${mailDesc.variables.invite_team_name} in Hoppscotch`;
+        return `A user has invited you to join a team workspace in Hoppscotch`;
 
-      case 'code-your-own':
+      case 'user-invitation':
         return 'Sign in to Hoppscotch';
     }
   }
 
   /**
    * Sends an email to the given email address given a mail description
-   * @param to The email address to be sent to (NOTE: this is not validated)
+   * @param to Receiver's email id
    * @param mailDesc Definition of what email to be sent
+   * @returns Response if email was send successfully or not
    */
-  sendMail(
+  async sendEmail(
     to: string,
     mailDesc: MailDescription | UserMagicLinkMailDescription,
   ) {
-    return TE.tryCatch(
-      async () => {
-        await this.nestMailerService.sendMail({
-          to,
-          template: mailDesc.template,
-          subject: this.resolveSubjectForMailDesc(mailDesc),
-          context: mailDesc.variables,
-        });
-      },
-      () => EMAIL_FAILED,
-    );
-  }
+    if (this.configService.get('INFRA.MAILER_SMTP_ENABLE') !== 'true') return;
 
-  /**
-   *
-   * @param to Receiver's email id
-   * @param mailDesc Details of email to be sent for Magic-Link auth
-   * @returns Response if email was send successfully or not
-   */
-  async sendAuthEmail(to: string, mailDesc: UserMagicLinkMailDescription) {
     try {
       await this.nestMailerService.sendMail({
         to,
@@ -70,6 +56,7 @@ export class MailerService {
         context: mailDesc.variables,
       });
     } catch (error) {
+      console.log('Error from sendEmail:', error);
       return throwErr(EMAIL_FAILED);
     }
   }
@@ -84,6 +71,8 @@ export class MailerService {
     to: string,
     mailDesc: AdminUserInvitationMailDescription,
   ) {
+    if (this.configService.get('INFRA.MAILER_SMTP_ENABLE') !== 'true') return;
+
     try {
       const res = await this.nestMailerService.sendMail({
         to,
@@ -93,6 +82,7 @@ export class MailerService {
       });
       return res;
     } catch (error) {
+      console.log('Error from sendUserInvitationEmail:', error);
       return throwErr(EMAIL_FAILED);
     }
   }

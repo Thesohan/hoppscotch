@@ -2,22 +2,14 @@
   <HoppSmartModal v-if="show" dialog :title="t('team.edit')" @close="hideModal">
     <template #body>
       <div class="flex flex-col">
-        <div class="relative flex">
-          <input
-            id="selectLabelTeamEdit"
-            v-model="name"
-            v-focus
-            class="input floating-input"
-            placeholder=" "
-            type="text"
-            autocomplete="off"
-            @keyup.enter="saveTeam"
-          />
-          <label for="selectLabelTeamEdit">
-            {{ t("action.label") }}
-          </label>
-        </div>
-        <div class="flex items-center justify-between flex-1 pt-4">
+        <HoppSmartInput
+          v-model="editingName"
+          placeholder=" "
+          :label="t('action.label')"
+          input-styles="floating-input"
+          @submit="saveTeam"
+        />
+        <div class="flex flex-1 items-center justify-between pt-4">
           <label for="memberList" class="p-4">
             {{ t("team.members") }}
           </label>
@@ -34,7 +26,7 @@
             />
           </div>
         </div>
-        <div v-if="teamDetails.loading" class="border rounded border-divider">
+        <div v-if="teamDetails.loading" class="rounded border border-divider">
           <div class="flex items-center justify-center p-4">
             <HoppSmartSpinner />
           </div>
@@ -43,33 +35,28 @@
           v-if="
             !teamDetails.loading &&
             E.isRight(teamDetails.data) &&
-            teamDetails.data.right.team.teamMembers
+            teamDetails.data.right.team?.teamMembers
           "
-          class="border rounded border-divider"
+          class="rounded border border-divider"
         >
-          <div
-            v-if="teamDetails.data.right.team.teamMembers === 0"
-            class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+          <HoppSmartPlaceholder
+            v-if="teamDetails.data.right.team.teamMembers.length === 0"
+            :src="`/images/states/${colorMode.value}/add_group.svg`"
+            :alt="`${t('empty.members')}`"
+            :text="t('empty.members')"
           >
-            <img
-              :src="`/images/states/${colorMode.value}/add_group.svg`"
-              loading="lazy"
-              class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-              :alt="`${t('empty.members')}`"
-            />
-            <span class="pb-4 text-center">
-              {{ t("empty.members") }}
-            </span>
-            <HoppButtonSecondary
-              :icon="IconUserPlus"
-              :label="t('team.invite')"
-              @click="
-                () => {
-                  emit('invite-team')
-                }
-              "
-            />
-          </div>
+            <template #body>
+              <HoppButtonSecondary
+                :icon="IconUserPlus"
+                :label="t('team.invite')"
+                @click="
+                  () => {
+                    emit('invite-team')
+                  }
+                "
+              />
+            </template>
+          </HoppSmartPlaceholder>
           <div v-else class="divide-y divide-dividerLight">
             <div
               v-for="(member, index) in membersList"
@@ -77,7 +64,7 @@
               class="flex divide-x divide-dividerLight"
             >
               <input
-                class="flex flex-1 px-4 py-2 bg-transparent"
+                class="flex flex-1 bg-transparent px-4 py-2"
                 :placeholder="`${t('team.email')}`"
                 :name="'param' + index"
                 :value="member.email"
@@ -90,15 +77,15 @@
                   theme="popover"
                   :on-shown="() => tippyActions![index].focus()"
                 >
-                  <span class="select-wrapper">
+                  <HoppSmartSelectWrapper>
                     <input
-                      class="flex flex-1 px-4 py-2 bg-transparent cursor-pointer"
+                      class="flex flex-1 cursor-pointer bg-transparent px-4 py-2"
                       :placeholder="`${t('team.permissions')}`"
                       :name="'value' + index"
                       :value="member.role"
                       readonly
                     />
-                  </span>
+                  </HoppSmartSelectWrapper>
                   <template #content="{ hide }">
                     <div
                       ref="tippyActions"
@@ -167,7 +154,7 @@
           v-if="!teamDetails.loading && E.isLeft(teamDetails.data)"
           class="flex flex-col items-center"
         >
-          <icon-lucide-help-circle class="mb-4 svg-icons" />
+          <icon-lucide-help-circle class="svg-icons mb-4" />
           {{ t("error.something_went_wrong") }}
         </div>
       </div>
@@ -192,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from "vue"
+import { computed, ref, watch } from "vue"
 import * as E from "fp-ts/Either"
 import {
   GetTeamDocument,
@@ -243,12 +230,12 @@ const props = defineProps<{
 
 const toast = useToast()
 
-const name = toRef(props.editingTeam, "name")
+const editingName = ref(props.editingTeam.name)
 
 watch(
   () => props.editingTeam.name,
   (newName: string) => {
-    name.value = newName
+    editingName.value = newName
   }
 )
 
@@ -291,7 +278,8 @@ const teamDetails = useGQLQuery<GetTeamQuery, GetTeamQueryVariables, "">({
           },
         },
       ]
-    } else return []
+    }
+    return []
   }),
 })
 
@@ -396,11 +384,11 @@ const isLoading = ref(false)
 
 const saveTeam = async () => {
   isLoading.value = true
-  if (name.value !== "") {
-    if (TeamNameCodec.is(name.value)) {
+  if (editingName.value !== "") {
+    if (TeamNameCodec.is(editingName.value)) {
       const updateTeamNameResult = await renameTeam(
         props.editingTeamID,
-        name.value
+        editingName.value
       )()
       if (E.isLeft(updateTeamNameResult)) {
         toast.error(`${t("error.something_went_wrong")}`)
