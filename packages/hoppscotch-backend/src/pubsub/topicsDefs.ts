@@ -21,8 +21,9 @@ import {
 } from 'src/team-request/team-request.model';
 import { TeamInvitation } from 'src/team-invitation/team-invitation.model';
 import { InvitedUser } from '../admin/invited-user.model';
-import { UserCollection } from '@prisma/client';
 import {
+  UserCollection,
+  UserCollectionDuplicatedData,
   UserCollectionRemovedData,
   UserCollectionReorderData,
 } from 'src/user-collection/user-collections.model';
@@ -42,12 +43,14 @@ export type TopicDef = {
     topic: `user_request/${string}/${'created' | 'updated' | 'deleted'}`
   ]: UserRequest;
   [topic: `user_request/${string}/${'moved'}`]: UserRequestReorderData;
-  [
-    topic: `user_history/${string}/${'created' | 'updated' | 'deleted'}`
-  ]: UserHistory;
+  [topic: `user_history/${string}/${'created' | 'updated' | 'deleted'}`]:
+    | UserHistory
+    | boolean;
+  [topic: `user_history/${string}/deleted_many`]: UserHistoryDeletedManyData;
   [
     topic: `user_coll/${string}/${'created' | 'updated' | 'moved'}`
   ]: UserCollection;
+  [topic: `user_coll/${string}/${'duplicated'}`]: UserCollectionDuplicatedData;
   [topic: `user_coll/${string}/${'deleted'}`]: UserCollectionRemovedData;
   [topic: `user_coll/${string}/${'order_updated'}`]: UserCollectionReorderData;
   [topic: `team/${string}/member_removed`]: string;
@@ -61,7 +64,6 @@ export type TopicDef = {
   [topic: `team_coll/${string}/${'coll_removed'}`]: string;
   [topic: `team_coll/${string}/${'coll_moved'}`]: TeamCollection;
   [topic: `team_coll/${string}/${'coll_order_updated'}`]: CollectionReorderData;
-  [topic: `user_history/${string}/deleted_many`]: UserHistoryDeletedManyData;
   [
     topic: `team_req/${string}/${'req_created' | 'req_updated' | 'req_moved'}`
   ]: TeamRequest;
@@ -69,5 +71,8 @@ export type TopicDef = {
   [topic: `team_req/${string}/req_deleted`]: string;
   [topic: `team/${string}/invite_added`]: TeamInvitation;
   [topic: `team/${string}/invite_removed`]: string;
-  [topic: `shortcode/${string}/${'created' | 'revoked'}`]: Shortcode;
+  [
+    topic: `shortcode/${string}/${'created' | 'revoked' | 'updated'}`
+  ]: Shortcode;
+  [topic: `infra_config/${string}/${'updated'}`]: string;
 };

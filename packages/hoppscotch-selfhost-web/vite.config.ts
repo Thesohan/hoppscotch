@@ -8,19 +8,20 @@ import VueI18n from "@intlify/vite-plugin-vue-i18n"
 import Components from "unplugin-vue-components/vite"
 import Icons from "unplugin-icons/vite"
 import Inspect from "vite-plugin-inspect"
-import WindiCSS from "vite-plugin-windicss"
 import { VitePWA } from "vite-plugin-pwa"
 import Pages from "vite-plugin-pages"
 import Layouts from "vite-plugin-vue-layouts"
 import IconResolver from "unplugin-icons/resolver"
 import { FileSystemIconLoader } from "unplugin-icons/loaders"
 import * as path from "path"
-import { VitePluginFonts } from "vite-plugin-fonts"
+import Unfonts from "unplugin-fonts/vite"
 import legacy from "@vitejs/plugin-legacy"
+import ImportMetaEnv from "@import-meta-env/unplugin"
 
-const ENV = loadEnv("development", path.resolve(__dirname, "../../"))
+const ENV = loadEnv("development", path.resolve(__dirname, "../../"), ["VITE_"])
 
 export default defineConfig({
+  envPrefix: process.env.HOPP_ALLOW_RUNTIME_ENV ? "VITE_BUILDTIME_" : "VITE_",
   envDir: path.resolve(__dirname, "../../"),
   // TODO: Migrate @hoppscotch/data to full ESM
   define: {
@@ -43,6 +44,14 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "tailwind.config.cjs": path.resolve(
+        __dirname,
+        "../hoppscotch-common/tailwind.config.cjs"
+      ),
+      "postcss.config.cjs": path.resolve(
+        __dirname,
+        "../hoppscotch-common/postcss.config.cjs"
+      ),
       // TODO: Maybe leave ~ only for individual apps and not use on common
       "~": path.resolve(__dirname, "../hoppscotch-common/src"),
       "@hoppscotch/common": "@hoppscotch/common/src",
@@ -65,6 +74,7 @@ export default defineConfig({
       "@lib": path.resolve(__dirname, "./src/lib"),
       stream: "stream-browserify",
       util: "util",
+      querystring: "qs",
     },
     dedupe: ["vue"],
   },
@@ -79,8 +89,7 @@ export default defineConfig({
       dirs: "../hoppscotch-common/src/pages",
       importMode: "async",
       onRoutesGenerated(routes) {
-        // HACK: See: https://github.com/jbaubree/vite-plugin-pages-sitemap/issues/173
-        return ((generateSitemap as any).default as typeof generateSitemap)({
+        generateSitemap({
           routes,
           nuxtStyle: true,
           allowRobots: true,
@@ -106,15 +115,9 @@ export default defineConfig({
       compositionOnly: true,
       include: [path.resolve(__dirname, "locales")],
     }),
-    WindiCSS({
-      root: path.resolve(__dirname, "../hoppscotch-common"),
-    }),
     Components({
       dts: "../hoppscotch-common/src/components.d.ts",
-      dirs: [
-        "../hoppscotch-common/src/components",
-        "../hoppscotch-ui/src/components",
-      ],
+      dirs: ["../hoppscotch-common/src/components"],
       directoryAsNamespace: true,
       resolvers: [
         IconResolver({
@@ -145,6 +148,7 @@ export default defineConfig({
       },
     }),
     VitePWA({
+      useCredentials: true,
       manifest: {
         name: APP_INFO.name,
         short_name: APP_INFO.name,
@@ -204,7 +208,7 @@ export default defineConfig({
       registerType: "prompt",
       workbox: {
         cleanupOutdatedCaches: true,
-        maximumFileSizeToCacheInBytes: 4194304,
+        maximumFileSizeToCacheInBytes: 10485760,
         navigateFallbackDenylist: [
           /robots.txt/,
           /sitemap.xml/,
@@ -216,15 +220,26 @@ export default defineConfig({
           /twitter/,
           /github/,
           /announcements/,
+          /admin/,
+          /backend/,
         ],
       },
     }),
-    VitePluginFonts({
-      google: {
+    Unfonts({
+      fontsource: {
         families: [
-          "Inter:wght@400;500;600;700;800",
-          "Roboto+Mono:wght@400;500",
-          "Material+Icons",
+          {
+            name: "Inter Variable",
+            variables: ["variable-full"],
+          },
+          {
+            name: "Material Symbols Rounded Variable",
+            variables: ["variable-full"],
+          },
+          {
+            name: "Roboto Mono Variable",
+            variables: ["variable-full"],
+          },
         ],
       },
     }),
@@ -232,5 +247,18 @@ export default defineConfig({
       modernPolyfills: ["es.string.replace-all"],
       renderLegacyChunks: false,
     }),
+    process.env.HOPP_ALLOW_RUNTIME_ENV
+      ? ImportMetaEnv.vite({
+          example: "../../.env.example",
+          env: "../../.env",
+        })
+      : [],
   ],
+  css: {
+    preprocessorOptions: {
+      scss: {
+        api: "modern",
+      },
+    },
+  },
 })

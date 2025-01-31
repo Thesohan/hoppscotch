@@ -1,15 +1,24 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { GqlExecutionContext } from '@nestjs/graphql';
+import { Prisma } from '@prisma/client';
+import * as A from 'fp-ts/Array';
+import * as E from 'fp-ts/Either';
 import { pipe } from 'fp-ts/lib/function';
 import * as O from 'fp-ts/Option';
-import * as TE from 'fp-ts/TaskEither';
 import * as T from 'fp-ts/Task';
-import * as E from 'fp-ts/Either';
-import * as A from 'fp-ts/Array';
+import * as TE from 'fp-ts/TaskEither';
+import { AuthProvider } from './auth/helper';
+import {
+  ENV_EMPTY_AUTH_PROVIDERS,
+  ENV_NOT_FOUND_KEY_AUTH_PROVIDERS,
+  ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY,
+  ENV_NOT_SUPPORT_AUTH_PROVIDERS,
+  JSON_INVALID,
+} from './errors';
 import { TeamMemberRole } from './team/team.model';
-import { User } from './user/user.model';
-import { JSON_INVALID } from './errors';
+import { RESTError } from './types/RESTError';
+import * as crypto from 'crypto';
 
 /**
  * A workaround to throw an exception in an expression.
@@ -19,6 +28,15 @@ import { JSON_INVALID } from './errors';
  */
 export function throwErr(errMessage: string): never {
   throw new Error(errMessage);
+}
+
+/**
+ * This function allows throw to be used as an expression
+ * @param errMessage Message present in the error message
+ */
+export function throwHTTPErr(errorData: RESTError): never {
+  const { message, statusCode } = errorData;
+  throw new HttpException(message, statusCode);
 }
 
 /**
@@ -98,6 +116,17 @@ export const getGqlArg = <ArgName extends string>(
   );
 
 /**
+ * To the daring adventurer who has stumbled upon this relic of code... welcome.
+ * Many have gazed upon its depths, yet few have returned with answers.
+ * I could have deleted it, but that felt... too easy, too final.
+ *
+ * If you're still reading, perhaps you're the one destined to unravel its secrets.
+ * Or, maybe you're like me—content to let it linger, a puzzle for the ages.
+ * The choice is yours, but beware... once you start, there is no turning back.
+ *
+ * PLEASE, NO ONE KNOWS HOW THIS WORKS...
+ * -- Balu, whispering from the great beyond... probably still trying to understand this damn thing.
+ *
  * Sequences an array of TaskEither values while maintaining an array of all the error values
  * @param arr Array of TaskEithers
  * @returns A TaskEither saying all the errors possible on the left or all the success values on the right
@@ -123,6 +152,58 @@ export const validateEmail = (email: string) => {
   return new RegExp(
     /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,
   ).test(email);
+};
+
+// Regular expressions for supported address object formats by nodemailer
+// check out for more info https://nodemailer.com/message/addresses
+const emailRegex1 = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const emailRegex2 =
+  /^[\w\s]* <([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>$/;
+const emailRegex3 =
+  /^"[\w\s]+" <([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>$/;
+
+/**
+ * Checks to see if the SMTP email is valid or not
+ * @param email
+ * @returns A Boolean depending on the format of the email
+ */
+export const validateSMTPEmail = (email: string) => {
+  // Check if the input matches any of the formats
+  return (
+    emailRegex1.test(email) ||
+    emailRegex2.test(email) ||
+    emailRegex3.test(email)
+  );
+};
+
+/**
+ * Checks to see if the URL is valid or not
+ * @param url The URL to validate
+ * @returns boolean
+ */
+export const validateSMTPUrl = (url: string) => {
+  // Possible valid formats
+  // smtp(s)://mail.example.com
+  // smtp(s)://user:pass@mail.example.com
+  // smtp(s)://mail.example.com:587
+  // smtp(s)://user:pass@mail.example.com:587
+
+  if (!url || url.length === 0) return false;
+
+  const regex =
+    /^(smtp|smtps):\/\/(?:([^:]+):([^@]+)@)?((?!\.)[^:]+)(?::(\d+))?$/;
+  if (regex.test(url)) return true;
+  return false;
+};
+
+/**
+ * Checks to see if the URL is valid or not
+ * @param url The URL to validate
+ * @returns boolean
+ */
+export const validateUrl = (url: string) => {
+  const urlRegex = /^(http|https):\/\/[^ "]+$/;
+  return urlRegex.test(url);
 };
 
 /**
@@ -151,4 +232,154 @@ export function isValidLength(title: string, length: number) {
   }
 
   return true;
+}
+
+/**
+ * This function is called by bootstrap() in main.ts
+ * It checks if the "VITE_ALLOWED_AUTH_PROVIDERS" environment variable is properly set or not.
+ * If not, it throws an error.
+ */
+export function checkEnvironmentAuthProvider(
+  VITE_ALLOWED_AUTH_PROVIDERS: string,
+) {
+  if (!VITE_ALLOWED_AUTH_PROVIDERS) {
+    throw new Error(ENV_NOT_FOUND_KEY_AUTH_PROVIDERS);
+  }
+
+  if (VITE_ALLOWED_AUTH_PROVIDERS === '') {
+    throw new Error(ENV_EMPTY_AUTH_PROVIDERS);
+  }
+
+  const givenAuthProviders = VITE_ALLOWED_AUTH_PROVIDERS.split(',').map(
+    (provider) => provider.toLocaleUpperCase(),
+  );
+  const supportedAuthProviders = Object.values(AuthProvider).map(
+    (provider: string) => provider.toLocaleUpperCase(),
+  );
+
+  for (const givenAuthProvider of givenAuthProviders) {
+    if (!supportedAuthProviders.includes(givenAuthProvider)) {
+      throw new Error(ENV_NOT_SUPPORT_AUTH_PROVIDERS);
+    }
+  }
+}
+
+/**
+ * Adds escape backslashes to the input so that it can be used inside
+ * SQL LIKE/ILIKE queries. Inspired by PHP's `mysql_real_escape_string`
+ * function.
+ *
+ * Eg. "100%" -> "100\\%"
+ *
+ * Source: https://stackoverflow.com/a/32648526
+ */
+export function escapeSqlLikeString(str: string) {
+  if (typeof str != 'string') return str;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+    switch (char) {
+      case '\0':
+        return '\\0';
+      case '\x08':
+        return '\\b';
+      case '\x09':
+        return '\\t';
+      case '\x1a':
+        return '\\z';
+      case '\n':
+        return '\\n';
+      case '\r':
+        return '\\r';
+      case '"':
+      case "'":
+      case '\\':
+      case '%':
+        return '\\' + char; // prepends a backslash to backslash, percent,
+      // and double/single quotes
+    }
+  });
+}
+
+/**
+ * Calculate the expiration date of the token
+ *
+ * @param expiresOn Number of days the token is valid for
+ * @returns Date object of the expiration date
+ */
+export function calculateExpirationDate(expiresOn: null | number) {
+  if (expiresOn === null) return null;
+  return new Date(Date.now() + expiresOn * 24 * 60 * 60 * 1000);
+}
+
+/*
+ * Transforms the collection level properties (authorization & headers) under the `data` field.
+ * Preserves `null` values and prevents duplicate stringification.
+ *
+ * @param {Prisma.JsonValue} collectionData - The team collection data to transform.
+ * @returns {string | null} The transformed team collection data as a string.
+ */
+export function transformCollectionData(
+  collectionData: Prisma.JsonValue,
+): string | null {
+  if (!collectionData) {
+    return null;
+  }
+
+  return typeof collectionData === 'string'
+    ? collectionData
+    : JSON.stringify(collectionData);
+}
+
+// Encrypt and Decrypt functions. InfraConfig and Account table uses these functions to encrypt and decrypt the data.
+const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+
+/**
+ * Encrypts a text using a key
+ * @param text The text to encrypt
+ * @param key The key to use for encryption
+ * @returns The encrypted text
+ */
+export function encrypt(text: string, key = process.env.DATA_ENCRYPTION_KEY) {
+  if (!key) throw new Error(ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY);
+
+  if (text === null || text === undefined) return text;
+
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(
+    ENCRYPTION_ALGORITHM,
+    Buffer.from(key),
+    iv,
+  );
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+/**
+ * Decrypts a text using a key
+ * @param text The text to decrypt
+ * @param key The key to use for decryption
+ * @returns The decrypted text
+ */
+export function decrypt(
+  encryptedData: string,
+  key = process.env.DATA_ENCRYPTION_KEY,
+) {
+  if (!key) throw new Error(ENV_NOT_FOUND_KEY_DATA_ENCRYPTION_KEY);
+
+  if (encryptedData === null || encryptedData === undefined) {
+    return encryptedData;
+  }
+
+  const textParts = encryptedData.split(':');
+  const iv = Buffer.from(textParts.shift(), 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv(
+    ENCRYPTION_ALGORITHM,
+    Buffer.from(key),
+    iv,
+  );
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
 }

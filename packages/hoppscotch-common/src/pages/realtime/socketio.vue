@@ -2,7 +2,7 @@
   <AppPaneLayout layout-id="socketio">
     <template #primary>
       <div
-        class="sticky top-0 z-10 flex flex-shrink-0 p-4 space-x-2 overflow-x-auto bg-primary"
+        class="sticky top-0 z-10 flex flex-shrink-0 space-x-2 overflow-x-auto bg-primary p-4"
       >
         <div class="inline-flex flex-1 space-x-2">
           <div class="flex flex-1">
@@ -13,12 +13,12 @@
                 theme="popover"
                 :on-shown="() => tippyActions.focus()"
               >
-                <span class="select-wrapper">
+                <HoppSmartSelectWrapper>
                   <input
                     id="client-version"
                     v-tippy="{ theme: 'tooltip' }"
                     title="socket.io-client version"
-                    class="flex px-4 py-2 font-semibold border rounded-l cursor-pointer bg-primaryLight border-divider text-secondaryDark w-26"
+                    class="flex w-26 cursor-pointer rounded-l border border-divider bg-primaryLight px-4 py-2 font-semibold text-secondaryDark"
                     :value="`Client ${clientVersion}`"
                     readonly
                     :disabled="
@@ -26,7 +26,7 @@
                       connectionState === 'CONNECTING'
                     "
                   />
-                </span>
+                </HoppSmartSelectWrapper>
                 <template #content="{ hide }">
                   <div
                     ref="tippyActions"
@@ -56,7 +56,7 @@
               autocomplete="off"
               spellcheck="false"
               :class="{ error: !isUrlValid }"
-              class="flex flex-1 w-full px-4 py-2 border bg-primaryLight border-divider text-secondaryDark"
+              class="flex w-full flex-1 border border-divider bg-primaryLight px-4 py-2 text-secondaryDark"
               :placeholder="`${t('socketio.url')}`"
               :disabled="
                 connectionState === 'CONNECTED' ||
@@ -67,7 +67,7 @@
             <input
               id="socketio-path"
               v-model="path"
-              class="flex flex-1 w-full px-4 py-2 border rounded-r bg-primaryLight border-divider text-secondaryDark"
+              class="flex w-full flex-1 rounded-r border border-divider bg-primaryLight px-4 py-2 text-secondaryDark"
               spellcheck="false"
               :disabled="
                 connectionState === 'CONNECTED' ||
@@ -85,8 +85,8 @@
               connectionState === 'CONNECTING'
                 ? t('action.connecting')
                 : connectionState === 'DISCONNECTED'
-                ? t('action.connect')
-                : t('action.disconnect')
+                  ? t('action.connect')
+                  : t('action.disconnect')
             "
             :loading="connectionState === 'CONNECTING'"
             @click="toggleConnection"
@@ -116,10 +116,10 @@
           :label="`${t('request.authorization')}`"
         >
           <div
-            class="sticky z-10 flex items-center justify-between flex-shrink-0 pl-4 overflow-x-auto border-b bg-primary border-dividerLight top-upperSecondaryStickyFold"
+            class="sticky top-upperSecondaryStickyFold z-10 flex flex-shrink-0 items-center justify-between overflow-x-auto border-b border-dividerLight bg-primary pl-4"
           >
             <span class="flex items-center">
-              <label class="font-semibold truncate text-secondaryLight">
+              <label class="truncate font-semibold text-secondaryLight">
                 {{ t("authorization.type") }}
               </label>
               <tippy
@@ -128,12 +128,12 @@
                 theme="popover"
                 :on-shown="() => authTippyActions.focus()"
               >
-                <span class="select-wrapper">
+                <HoppSmartSelectWrapper>
                   <HoppButtonSecondary
-                    class="pr-8 ml-2 rounded-none"
+                    class="ml-2 rounded-none pr-8"
                     :label="authType"
                   />
-                </span>
+                </HoppSmartSelectWrapper>
                 <template #content="{ hide }">
                   <div
                     ref="authTippyActions"
@@ -190,29 +190,23 @@
               />
             </div>
           </div>
-          <div
+          <HoppSmartPlaceholder
             v-if="authType === 'None'"
-            class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+            :src="`/images/states/${colorMode.value}/login.svg`"
+            :alt="`${t('socketio.connection_not_authorized')}`"
+            :text="`${t('socketio.connection_not_authorized')}`"
           >
-            <img
-              :src="`/images/states/${colorMode.value}/login.svg`"
-              loading="lazy"
-              class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-              :alt="`${t('empty.authorization')}`"
-            />
-            <span class="pb-4 text-center">
-              {{ t("socketio.connection_not_authorized") }}
-            </span>
-            <HoppButtonSecondary
-              outline
-              :label="t('app.documentation')"
-              to="https://docs.hoppscotch.io/documentation/features/authorization"
-              blank
-              :icon="IconExternalLink"
-              reverse
-              class="mb-4"
-            />
-          </div>
+            <template #body>
+              <HoppButtonSecondary
+                outline
+                :label="t('app.documentation')"
+                to="https://docs.hoppscotch.io/documentation/features/authorization"
+                blank
+                :icon="IconExternalLink"
+                reverse
+              />
+            </template>
+          </HoppSmartPlaceholder>
           <div
             v-if="authType === 'Bearer'"
             class="flex flex-1 border-b border-dividerLight"
@@ -223,7 +217,7 @@
               </div>
             </div>
             <div
-              class="sticky flex-shrink-0 h-full p-4 overflow-auto overflow-x-auto bg-primary top-upperTertiaryStickyFold min-w-46 max-w-1/3 z-9"
+              class="z-[9] sticky top-upperTertiaryStickyFold h-full min-w-[12rem] max-w-1/3 flex-shrink-0 overflow-auto overflow-x-auto bg-primary p-4"
             >
               <div class="p-2">
                 <div class="pb-2 text-secondaryLight">
@@ -246,7 +240,7 @@
     <template #secondary>
       <RealtimeLog
         :title="t('socketio.log')"
-        :log="(log as LogEntryData[])"
+        :log="log as LogEntryData[]"
         @delete="clearLogEntries()"
       />
     </template>

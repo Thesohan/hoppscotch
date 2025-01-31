@@ -11,35 +11,28 @@
           @sort="sortTabs"
         >
           <HoppSmartWindow
-            v-for="tab in tabs"
+            v-for="tab in activeTabs"
             :id="tab.id"
             :key="tab.id"
-            :label="tab.document.request.name"
-            :is-removable="tabs.length > 1"
+            :label="getTabName(tab)"
+            :is-removable="activeTabs.length > 1"
             :close-visibility="'hover'"
           >
-            <template #tabhead>
-              <div
-                v-tippy="{ theme: 'tooltip', delay: [500, 20] }"
-                :title="tab.document.request.name"
-                class="truncate px-2"
-                @dblclick="openReqRenameModal()"
-              >
-                <span
-                  class="font-semibold text-tiny"
-                  :class="getMethodLabelColorClassOf(tab.document.request)"
-                >
-                  {{ tab.document.request.method }}
-                </span>
-                <span class="leading-8 px-2">
-                  {{ tab.document.request.name }}
-                </span>
-              </div>
+            <template v-if="tab.document.type === 'request'" #tabhead>
+              <HttpTabHead
+                :tab="tab"
+                :is-removable="activeTabs.length > 1"
+                @open-rename-modal="openReqRenameModal(tab.id)"
+                @close-tab="removeTab(tab.id)"
+                @close-other-tabs="closeOtherTabsAction(tab.id)"
+                @duplicate-tab="duplicateTab(tab.id)"
+                @share-tab-request="shareTabRequest(tab.id)"
+              />
             </template>
             <template #suffix>
               <span
                 v-if="tab.document.isDirty"
-                class="flex items-center justify-center text-secondary group-hover:hidden w-4"
+                class="flex w-4 items-center justify-center text-secondary group-hover:hidden"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -51,10 +44,24 @@
                 </svg>
               </span>
             </template>
-            <HttpRequestTab
+            <HttpExampleResponseTab
+              v-if="tab.document.type === 'example-response'"
               :model-value="tab"
               @update:model-value="onTabUpdate"
             />
+            <!-- Render TabContents -->
+            <HttpTestRunner
+              v-if="tab.document.type === 'test-runner'"
+              :model-value="tab"
+              @update:model-value="onTabUpdate"
+            />
+            <!-- When document.type === 'request' the tab type is HoppTab<HoppRequestDocument>-->
+            <HttpRequestTab
+              v-if="tab.document.type === 'request'"
+              :model-value="tab"
+              @update:model-value="onTabUpdate"
+            />
+            <!-- END Render TabContents -->
           </HoppSmartWindow>
           <template #actions>
             <EnvironmentsSelector class="h-full" />
@@ -67,84 +74,125 @@
     </AppPaneLayout>
     <CollectionsEditRequest
       v-model="reqName"
+      :request-context="requestToRename"
       :show="showRenamingReqNameModal"
       @submit="renameReqName"
       @hide-modal="showRenamingReqNameModal = false"
     />
     <HoppSmartConfirmModal
-      :show="confirmingCloseForTabID !== null"
+      :show="confirmingCloseAllTabs"
       :confirm="t('modal.close_unsaved_tab')"
-      :title="t('confirm.save_unsaved_tab')"
-      @hide-modal="onCloseConfirmSaveTab"
-      @resolve="onResolveConfirmSaveTab"
+      :title="t('confirm.close_unsaved_tabs', { count: unsavedTabsCount })"
+      @hide-modal="confirmingCloseAllTabs = false"
+      @resolve="onResolveConfirmCloseAllTabs"
     />
+    <HoppSmartModal
+      v-if="confirmingCloseForTabID !== null"
+      dialog
+      role="dialog"
+      aria-modal="true"
+      :title="t('modal.close_unsaved_tab')"
+      @close="confirmingCloseForTabID = null"
+    >
+      <template #body>
+        <div class="text-center">
+          {{ t("confirm.save_unsaved_tab") }}
+        </div>
+      </template>
+      <template #footer>
+        <span class="flex space-x-2">
+          <HoppButtonPrimary
+            v-focus
+            :label="t?.('action.yes')"
+            outline
+            @click="onResolveConfirmSaveTab"
+          />
+          <HoppButtonSecondary
+            :label="t?.('action.no')"
+            filled
+            outline
+            @click="onCloseConfirmSaveTab"
+          />
+        </span>
+      </template>
+    </HoppSmartModal>
     <CollectionsSaveRequest
       v-if="savingRequest"
       mode="rest"
       :show="savingRequest"
       @hide-modal="onSaveModalClose"
     />
+    <AppContextMenu
+      v-if="contextMenu.show"
+      :show="contextMenu.show"
+      :position="contextMenu.position"
+      :text="contextMenu.text"
+      @hide-modal="contextMenu.show = false"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, onBeforeUnmount, onBeforeMount } from "vue"
+import { ref, onMounted, computed } from "vue"
 import { safelyExtractRESTRequest } from "@hoppscotch/data"
 import { translateExtURLParams } from "~/helpers/RESTExtURLParams"
 import { useRoute } from "vue-router"
-import { getMethodLabelColorClassOf } from "~/helpers/rest/labelColoring"
 import { useI18n } from "@composables/i18n"
-import {
-  closeTab,
-  createNewTab,
-  currentActiveTab,
-  currentTabID,
-  getActiveTabs,
-  getTabRef,
-  HoppRESTTab,
-  loadTabsFromPersistedState,
-  persistableTabState,
-  updateTab,
-  updateTabOrdering,
-} from "~/helpers/rest/tab"
 import { getDefaultRESTRequest } from "~/helpers/rest/default"
-import { invokeAction } from "~/helpers/actions"
-import { onLoggedIn } from "~/composables/auth"
+import { defineActionHandler, invokeAction } from "~/helpers/actions"
 import { platform } from "~/platform"
-import {
-  audit,
-  BehaviorSubject,
-  combineLatest,
-  EMPTY,
-  from,
-  map,
-  Subscription,
-} from "rxjs"
-import { useToast } from "~/composables/toast"
-import { PersistableRESTTabState } from "~/helpers/rest/tab"
-import { watchDebounced } from "@vueuse/core"
-import { oauthRedirect } from "~/helpers/oauth"
 import { useReadonlyStream } from "~/composables/stream"
-import {
-  changeCurrentSyncStatus,
-  currentSyncingStatus$,
-} from "~/newstore/syncing"
+import { useService } from "dioc/vue"
+import { InspectionService } from "~/services/inspection"
+import { HeaderInspectorService } from "~/services/inspection/inspectors/header.inspector"
+import { EnvironmentInspectorService } from "~/services/inspection/inspectors/environment.inspector"
+import { InterceptorsInspectorService } from "~/services/inspection/inspectors/interceptors.inspector"
+import { ResponseInspectorService } from "~/services/inspection/inspectors/response.inspector"
+import { cloneDeep } from "lodash-es"
+import { RESTTabService } from "~/services/tab/rest"
+import { HoppTab } from "~/services/tab"
+import { HoppRequestDocument, HoppTabDocument } from "~/helpers/rest/document"
+import { AuthorizationInspectorService } from "~/services/inspection/inspectors/authorization.inspector"
 
 const savingRequest = ref(false)
 const confirmingCloseForTabID = ref<string | null>(null)
+const confirmingCloseAllTabs = ref(false)
 const showRenamingReqNameModal = ref(false)
 const reqName = ref<string>("")
+const unsavedTabsCount = ref(0)
+const exceptedTabID = ref<string | null>(null)
+const renameTabID = ref<string | null>(null)
 
 const t = useI18n()
-const toast = useToast()
 
-const tabs = getActiveTabs()
+const tabs = useService(RESTTabService)
 
-const confirmSync = useReadonlyStream(currentSyncingStatus$, {
-  isInitialSync: false,
-  shouldSync: true,
+const currentTabID = tabs.currentTabID
+
+const currentUser = useReadonlyStream(
+  platform.auth.getCurrentUserStream(),
+  platform.auth.getCurrentUser()
+)
+
+type PopupDetails = {
+  show: boolean
+  position: {
+    top: number
+    left: number
+  }
+  text: string | null
+}
+
+const contextMenu = ref<PopupDetails>({
+  show: false,
+  position: {
+    top: 0,
+    left: 0,
+  },
+  text: null,
 })
-const tabStateForSync = ref<PersistableRESTTabState | null>(null)
+
+const activeTabs = tabs.getActiveTabs()
 
 function bindRequestToURLParams() {
   const route = useRoute()
@@ -155,51 +203,125 @@ function bindRequestToURLParams() {
     // We skip URL params parsing
     if (Object.keys(query).length === 0 || query.code || query.error) return
 
-    const request = currentActiveTab.value.document.request
+    if (tabs.currentActiveTab.value.document.type !== "request") return
 
-    currentActiveTab.value.document.request = safelyExtractRESTRequest(
+    const request = tabs.currentActiveTab.value.document.request
+
+    tabs.currentActiveTab.value.document.request = safelyExtractRESTRequest(
       translateExtURLParams(query, request),
       getDefaultRESTRequest()
     )
   })
 }
 
-const onTabUpdate = (tab: HoppRESTTab) => {
-  updateTab(tab)
+const onTabUpdate = (tab: HoppTab<HoppRequestDocument>) => {
+  tabs.updateTab(tab)
 }
 
 const addNewTab = () => {
-  const tab = createNewTab({
+  const tab = tabs.createNewTab({
+    type: "request",
     request: getDefaultRESTRequest(),
     isDirty: false,
   })
 
-  currentTabID.value = tab.id
+  tabs.setActiveTab(tab.id)
 }
 const sortTabs = (e: { oldIndex: number; newIndex: number }) => {
-  updateTabOrdering(e.oldIndex, e.newIndex)
+  tabs.updateTabOrdering(e.oldIndex, e.newIndex)
 }
 
-const removeTab = (tabID: string) => {
-  const tab = getTabRef(tabID)
+const getTabName = (tab: HoppTab<HoppTabDocument>) => {
+  if (tab.document.type === "request") {
+    return tab.document.request.name
+  } else if (tab.document.type === "test-runner") {
+    return tab.document.collection.name
+  } else if (tab.document.type === "example-response") {
+    return tab.document.response.name
+  }
 
-  if (tab.value.document.isDirty) {
+  return "Unnamed tab"
+}
+
+const inspectionService = useService(InspectionService)
+
+const removeTab = (tabID: string) => {
+  const tabState = tabs.getTabRef(tabID).value
+
+  if (tabState.document.isDirty) {
     confirmingCloseForTabID.value = tabID
   } else {
-    closeTab(tab.value.id)
+    tabs.closeTab(tabState.id)
+    inspectionService.deleteTabInspectorResult(tabState.id)
   }
 }
 
-const openReqRenameModal = () => {
+const closeOtherTabsAction = (tabID: string) => {
+  const isTabDirty = tabs.getTabRef(tabID).value?.document.isDirty
+  const dirtyTabCount = tabs.getDirtyTabsCount()
+  // If current tab is dirty, so we need to subtract 1 from the dirty tab count
+  const balanceDirtyTabCount = isTabDirty ? dirtyTabCount - 1 : dirtyTabCount
+
+  // If there are dirty tabs, show the confirm modal
+  if (balanceDirtyTabCount > 0) {
+    confirmingCloseAllTabs.value = true
+    unsavedTabsCount.value = balanceDirtyTabCount
+    exceptedTabID.value = tabID
+  } else {
+    tabs.closeOtherTabs(tabID)
+  }
+}
+
+const duplicateTab = (tabID: string) => {
+  const tab = tabs.getTabRef(tabID)
+  if (tab.value && tab.value.document.type === "request") {
+    const newTab = tabs.createNewTab({
+      type: "request",
+      request: cloneDeep(tab.value.document.request),
+      isDirty: true,
+    })
+    tabs.setActiveTab(newTab.id)
+  }
+}
+
+const onResolveConfirmCloseAllTabs = () => {
+  if (exceptedTabID.value) tabs.closeOtherTabs(exceptedTabID.value)
+  confirmingCloseAllTabs.value = false
+}
+
+const requestToRename = computed(() => {
+  if (!renameTabID.value) return null
+  const tab = tabs.getTabRef(renameTabID.value)
+
+  return tab.value.document.type === "request"
+    ? tab.value.document.request
+    : null
+})
+
+const openReqRenameModal = (tabID?: string) => {
+  if (tabID) {
+    const tab = tabs.getTabRef(tabID)
+
+    if (tab.value.document.type !== "request") return
+
+    reqName.value = tab.value.document.request.name
+    renameTabID.value = tabID
+  } else {
+    const { id, document } = tabs.currentActiveTab.value
+
+    if (document.type !== "request") return
+
+    reqName.value = document.request.name
+    renameTabID.value = id
+  }
   showRenamingReqNameModal.value = true
-  reqName.value = currentActiveTab.value.document.request.name
 }
 
 const renameReqName = () => {
-  const tab = getTabRef(currentTabID.value)
-  if (tab.value) {
+  const tab = tabs.getTabRef(renameTabID.value ?? currentTabID.value)
+  if (tab.value && tab.value.document.type === "request") {
     tab.value.document.request.name = reqName.value
-    updateTab(tab.value)
+    tabs.updateTab(tab.value)
   }
   showRenamingReqNameModal.value = false
 }
@@ -209,7 +331,8 @@ const renameReqName = () => {
  */
 const onCloseConfirmSaveTab = () => {
   if (!savingRequest.value && confirmingCloseForTabID.value) {
-    closeTab(confirmingCloseForTabID.value)
+    tabs.closeTab(confirmingCloseForTabID.value)
+    inspectionService.deleteTabInspectorResult(confirmingCloseForTabID.value)
     confirmingCloseForTabID.value = null
   }
 }
@@ -218,11 +341,11 @@ const onCloseConfirmSaveTab = () => {
  * Called when the user confirms they want to save the tab
  */
 const onResolveConfirmSaveTab = () => {
-  if (currentActiveTab.value.document.saveContext) {
-    invokeAction("request.save")
+  if (tabs.currentActiveTab.value.document.saveContext) {
+    invokeAction("request-response.save")
 
     if (confirmingCloseForTabID.value) {
-      closeTab(confirmingCloseForTabID.value)
+      tabs.closeTab(confirmingCloseForTabID.value)
       confirmingCloseForTabID.value = null
     }
   } else {
@@ -236,136 +359,68 @@ const onResolveConfirmSaveTab = () => {
 const onSaveModalClose = () => {
   savingRequest.value = false
   if (confirmingCloseForTabID.value) {
-    closeTab(confirmingCloseForTabID.value)
+    tabs.closeTab(confirmingCloseForTabID.value)
     confirmingCloseForTabID.value = null
   }
 }
 
-const syncTabState = () => {
-  if (tabStateForSync.value) loadTabsFromPersistedState(tabStateForSync.value)
-}
-
-/**
- * Performs sync of the REST Tab session with Firestore.
- *
- * @returns A subscription to the sync observable stream.
- * Unsubscribe to stop syncing.
- */
-function startTabStateSync(): Subscription {
-  const currentUser$ = platform.auth.getCurrentUserStream()
-  const tabState$ = new BehaviorSubject<PersistableRESTTabState | null>(null)
-
-  watchDebounced(
-    persistableTabState,
-    (state) => {
-      tabState$.next(state)
-    },
-    { debounce: 500, deep: true }
-  )
-
-  const sub = combineLatest([currentUser$, tabState$])
-    .pipe(
-      map(([user, tabState]) =>
-        user && tabState
-          ? from(platform.sync.tabState.writeCurrentTabState(user, tabState))
-          : EMPTY
-      ),
-      audit((x) => x)
-    )
-    .subscribe(() => {
-      // NOTE: This subscription should be kept
-    })
-
-  return sub
-}
-
-const showSyncToast = () => {
-  toast.show(t("confirm.sync"), {
-    duration: 0,
-    action: [
-      {
-        text: `${t("action.yes")}`,
-        onClick: (_, toastObject) => {
-          syncTabState()
-          changeCurrentSyncStatus({
-            isInitialSync: true,
-            shouldSync: true,
-          })
-          toastObject.goAway(0)
-        },
-      },
-      {
-        text: `${t("action.no")}`,
-        onClick: (_, toastObject) => {
-          changeCurrentSyncStatus({
-            isInitialSync: true,
-            shouldSync: false,
-          })
-          toastObject.goAway(0)
-        },
-      },
-    ],
-  })
-}
-
-function setupTabStateSync() {
-  const route = useRoute()
-
-  // Subscription to request sync
-  let sub: Subscription | null = null
-
-  // Load request on login resolve and start sync
-  onLoggedIn(async () => {
-    if (
-      Object.keys(route.query).length === 0 &&
-      !(route.query.code || route.query.error)
-    ) {
-      const tabStateFromSync =
-        await platform.sync.tabState.loadTabStateFromSync()
-
-      if (tabStateFromSync && !confirmSync.value.isInitialSync) {
-        tabStateForSync.value = tabStateFromSync
-        showSyncToast()
-        // Have to set isInitialSync to true here because the toast is shown
-        // and the user does not click on any of the actions
-        changeCurrentSyncStatus({
-          isInitialSync: true,
-          shouldSync: false,
-        })
-      }
+const shareTabRequest = (tabID: string) => {
+  const tab = tabs.getTabRef(tabID)
+  if (tab.value && tab.value.document.type === "request") {
+    if (currentUser.value) {
+      invokeAction("share.request", {
+        request: tab.value.document.request,
+      })
+    } else {
+      invokeAction("modals.login.toggle")
     }
-
-    sub = startTabStateSync()
-  })
-
-  // Stop subscription to stop syncing
-  onBeforeUnmount(() => {
-    sub?.unsubscribe()
-  })
+  }
 }
 
-function oAuthURL() {
-  onBeforeMount(async () => {
-    try {
-      const tokenInfo = await oauthRedirect()
-      if (
-        typeof tokenInfo === "object" &&
-        tokenInfo.hasOwnProperty("access_token")
-      ) {
-        if (
-          currentActiveTab.value.document.request.auth.authType === "oauth-2"
-        ) {
-          currentActiveTab.value.document.request.auth.token =
-            tokenInfo.access_token
-        }
-      }
+defineActionHandler("contextmenu.open", ({ position, text }) => {
+  if (text) {
+    contextMenu.value = {
+      show: true,
+      position,
+      text,
+    }
+  } else {
+    contextMenu.value = {
+      show: false,
+      position,
+      text,
+    }
+  }
+})
 
-      // eslint-disable-next-line no-empty
-    } catch (_) {}
-  })
-}
-
-setupTabStateSync()
 bindRequestToURLParams()
-oAuthURL()
+
+defineActionHandler("rest.request.open", ({ doc }) => {
+  tabs.createNewTab(doc)
+})
+
+defineActionHandler("request.rename", () => {
+  if (tabs.currentActiveTab.value.document.type === "request")
+    openReqRenameModal(tabs.currentActiveTab.value.id)
+})
+defineActionHandler("tab.duplicate-tab", ({ tabID }) => {
+  duplicateTab(tabID ?? currentTabID.value)
+})
+defineActionHandler("tab.close-current", () => {
+  removeTab(currentTabID.value)
+})
+defineActionHandler("tab.close-other", () => {
+  tabs.closeOtherTabs(currentTabID.value)
+})
+defineActionHandler("tab.open-new", addNewTab)
+
+useService(HeaderInspectorService)
+useService(EnvironmentInspectorService)
+useService(ResponseInspectorService)
+useService(AuthorizationInspectorService)
+useService(InterceptorsInspectorService)
+
+for (const inspectorDef of platform.additionalInspectors ?? []) {
+  useService(inspectorDef.service)
+}
 </script>

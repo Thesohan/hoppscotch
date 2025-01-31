@@ -49,7 +49,12 @@ const parseURL = (urlText: string | number) =>
     urlText,
     O.fromNullable,
     // preprocess url string
-    O.map((u) => u.toString().replaceAll(/[^a-zA-Z0-9_\-./?&=:@%+#,;\s]/g, "")),
+    O.map((u) =>
+      u
+        .toString()
+        .replace(/^'|'$/g, "")
+        .replaceAll(/[^a-zA-Z0-9_\-./?&=:@%+#,;()'<>\s]/g, "")
+    ),
     O.filter((u) => u.length > 0),
     O.chain((u) =>
       pipe(
@@ -71,9 +76,11 @@ const parseURL = (urlText: string | number) =>
  * @returns URL object
  */
 export function getURLObject(parsedArguments: parser.Arguments) {
+  const location = parsedArguments.location ?? undefined
+
   return pipe(
     // contains raw url strings
-    parsedArguments._.slice(1),
+    [...parsedArguments._.slice(1), location],
     A.findFirstMap(parseURL),
     // no url found
     O.getOrElse(() => new URL(defaultRESTReq.endpoint))

@@ -9,6 +9,9 @@ import {
   DeleteCollectionDocument,
   DeleteCollectionMutation,
   DeleteCollectionMutationVariables,
+  DuplicateTeamCollectionDocument,
+  DuplicateTeamCollectionMutation,
+  DuplicateTeamCollectionMutationVariables,
   ImportFromJsonDocument,
   ImportFromJsonMutation,
   ImportFromJsonMutationVariables,
@@ -21,6 +24,9 @@ import {
   UpdateCollectionOrderDocument,
   UpdateCollectionOrderMutation,
   UpdateCollectionOrderMutationVariables,
+  UpdateTeamCollectionDocument,
+  UpdateTeamCollectionMutation,
+  UpdateTeamCollectionMutationVariables,
 } from "../graphql"
 
 type CreateNewRootCollectionError = "team_coll/short_title"
@@ -122,3 +128,27 @@ export const importJSONToTeam = (collectionJSON: string, teamID: string) =>
       teamID,
     }
   )
+
+export const updateTeamCollection = (
+  collectionID: string,
+  data?: string,
+  newTitle?: string
+) =>
+  runMutation<
+    UpdateTeamCollectionMutation,
+    UpdateTeamCollectionMutationVariables,
+    ""
+  >(UpdateTeamCollectionDocument, {
+    collectionID,
+    data,
+    newTitle,
+  })
+
+export const duplicateTeamCollection = (collectionID: string) =>
+  runMutation<
+    DuplicateTeamCollectionMutation,
+    DuplicateTeamCollectionMutationVariables,
+    ""
+  >(DuplicateTeamCollectionDocument, {
+    collectionID,
+  })

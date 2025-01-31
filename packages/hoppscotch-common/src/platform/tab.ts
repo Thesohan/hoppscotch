@@ -1,10 +1,11 @@
-import { PersistableRESTTabState } from "~/helpers/rest/tab"
+import { PersistableTabState } from "~/services/tab"
 import { HoppUser } from "./auth"
+import { HoppTabDocument } from "~/helpers/rest/document"
 
 export type TabStatePlatformDef = {
-  loadTabStateFromSync: () => Promise<PersistableRESTTabState | null>
+  loadTabStateFromSync: () => Promise<PersistableTabState<HoppTabDocument> | null>
   writeCurrentTabState: (
     user: HoppUser,
-    persistableTabState: PersistableRESTTabState
+    persistableTabState: PersistableTabState<HoppTabDocument>
   ) => Promise<void>
 }

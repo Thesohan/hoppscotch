@@ -1,6 +1,6 @@
 <template>
   <HoppSmartTabs
-    v-if="tab.response"
+    v-if="doc.response"
     v-model="selectedLensTab"
     styles="sticky overflow-x-auto flex-shrink-0 z-10 bg-primary top-lowerPrimaryStickyFold"
   >
@@ -9,11 +9,14 @@
       :id="lens.renderer"
       :key="`lens-${index}`"
       :label="t(lens.lensName)"
-      class="flex flex-col flex-1 w-full h-full"
+      class="flex h-full w-full flex-1 flex-col"
     >
       <component
         :is="lensRendererFor(lens.renderer)"
-        :response="tab.response"
+        v-model:response="doc.response"
+        :is-savable="isSavable"
+        :is-editable="isEditable"
+        @save-as-example="$emit('save-as-example')"
       />
     </HoppSmartTab>
     <HoppSmartTab
@@ -21,26 +24,30 @@
       id="headers"
       :label="t('response.headers')"
       :info="`${maybeHeaders.length}`"
-      class="flex flex-col flex-1"
+      class="flex flex-1 flex-col"
     >
-      <LensesHeadersRenderer :headers="maybeHeaders" />
+      <LensesHeadersRenderer v-model="maybeHeaders" :is-editable="false" />
     </HoppSmartTab>
     <HoppSmartTab
+      v-if="doc.response?.type !== 'network_fail' && !isEditable"
       id="results"
       :label="t('test.results')"
-      :indicator="
-        tab.testResults &&
-        (tab.testResults.expectResults.length ||
-          tab.testResults.tests.length ||
-          tab.testResults.envDiff.selected.additions.length ||
-          tab.testResults.envDiff.selected.updations.length ||
-          tab.testResults.envDiff.global.updations.length)
-          ? true
-          : false
-      "
-      class="flex flex-col flex-1"
+      :indicator="showIndicator"
+      class="flex flex-1 flex-col"
     >
-      <HttpTestResult v-model="tab.testResults" />
+      <HttpTestResult v-model="doc.testResults" />
+    </HoppSmartTab>
+    <HoppSmartTab
+      v-if="requestHeaders"
+      id="req-headers"
+      :label="t('response.request_headers')"
+      :info="`${requestHeaders?.length}`"
+      class="flex flex-1 flex-col"
+    >
+      <LensesHeadersRenderer
+        :model-value="requestHeaders"
+        :is-editable="false"
+      />
     </HoppSmartTab>
   </HoppSmartTabs>
 </template>
@@ -54,20 +61,37 @@ import {
 } from "~/helpers/lenses/lenses"
 import { useI18n } from "@composables/i18n"
 import { useVModel } from "@vueuse/core"
-import { HoppRESTTab } from "~/helpers/rest/tab"
+import { HoppRequestDocument } from "~/helpers/rest/document"
 
 const props = defineProps<{
-  tab: HoppRESTTab
-  selectedTabPreference: string | null
+  document: HoppRequestDocument
+  isEditable: boolean
+  isTestRunner?: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: "update:tab", val: HoppRESTTab): void
-  (e: "update:selectedTabPreference", newTab: string): void
+  (e: "update:document", document: HoppRequestDocument): void
+  (e: "save-as-example"): void
 }>()
 
-const tab = useVModel(props, "tab", emit)
-const selectedTabPreference = useVModel(props, "selectedTabPreference", emit)
+const doc = useVModel(props, "document", emit)
+
+const isSavable = computed(() => {
+  return doc.value.response?.type === "success" && doc.value.saveContext
+})
+
+const showIndicator = computed(() => {
+  if (!doc.value.testResults) return false
+
+  const { expectResults, tests, envDiff } = doc.value.testResults
+  return Boolean(
+    expectResults.length ||
+      tests.length ||
+      envDiff.selected.additions.length ||
+      envDiff.selected.updations.length ||
+      envDiff.global.updations.length
+  )
+})
 
 const allLensRenderers = getLensRenderers()
 
@@ -81,25 +105,42 @@ const selectedLensTab = ref("")
 
 const maybeHeaders = computed(() => {
   if (
-    !tab.value.response ||
+    !doc.value.response ||
     !(
-      tab.value.response.type === "success" ||
-      tab.value.response.type === "fail"
+      doc.value.response.type === "success" ||
+      doc.value.response.type === "fail"
     )
   )
     return null
-  return tab.value.response.headers
+  return doc.value.response.headers
+})
+
+const requestHeaders = computed(() => {
+  if (
+    !props.isTestRunner ||
+    !doc.value.response ||
+    !(
+      doc.value.response.type === "success" ||
+      doc.value.response.type === "fail" ||
+      doc.value.response.type === "network_fail"
+    )
+  )
+    return null
+  return doc.value.response?.req.headers || doc.value.request.headers
 })
 
 const validLenses = computed(() => {
-  if (!tab.value.response) return []
-  return getSuitableLenses(tab.value.response)
+  if (!doc.value.response) return []
+  return getSuitableLenses(doc.value.response)
 })
 
 watch(
   validLenses,
   (newLenses: Lens[]) => {
-    if (newLenses.length === 0) return
+    if (newLenses.length === 0) {
+      selectedLensTab.value = "req-headers"
+      return
+    }
 
     const validRenderers = [
       ...newLenses.map((x) => x.renderer),
@@ -107,11 +148,13 @@ watch(
       "results",
     ]
 
+    const { responseTabPreference } = doc.value
+
     if (
-      selectedTabPreference.value &&
-      validRenderers.includes(selectedTabPreference.value)
+      responseTabPreference &&
+      validRenderers.includes(responseTabPreference)
     ) {
-      selectedLensTab.value = selectedTabPreference.value
+      selectedLensTab.value = responseTabPreference
     } else {
       selectedLensTab.value = newLenses[0].renderer
     }
@@ -120,6 +163,7 @@ watch(
 )
 
 watch(selectedLensTab, (newLensID) => {
-  selectedTabPreference.value = newLensID
+  if (props.isTestRunner) return
+  doc.value.responseTabPreference = newLensID
 })
 </script>

@@ -12,16 +12,16 @@
       @dragleave="ordering = false"
       @dragend="resetDragState"
     ></div>
-    <div class="flex flex-col relative">
+    <div class="relative flex flex-col">
       <div
-        class="absolute bg-accent opacity-0 pointer-events-none inset-0 z-1 transition"
+        class="z-[1] pointer-events-none absolute inset-0 bg-accent opacity-0 transition"
         :class="{
           'opacity-25':
             dragging && notSameDestination && notSameParentDestination,
         }"
       ></div>
       <div
-        class="flex items-stretch group relative z-3 cursor-pointer pointer-events-auto"
+        class="z-[3] group pointer-events-auto relative flex cursor-pointer items-stretch"
         :draggable="!hasNoTeamAccess"
         @dragstart="dragStart"
         @drop="handelDrop($event)"
@@ -33,14 +33,14 @@
             dropItemID = ''
           }
         "
-        @contextmenu.prevent="options?.tippy.show()"
+        @contextmenu.prevent="options?.tippy?.show()"
       >
         <div
-          class="flex items-center justify-center flex-1 min-w-0"
+          class="flex min-w-0 flex-1 items-center justify-center"
           @click="emit('toggle-children')"
         >
           <span
-            class="flex items-center justify-center px-4 pointer-events-none"
+            class="pointer-events-none flex items-center justify-center px-4"
           >
             <HoppSmartSpinner v-if="isCollLoading" />
             <component
@@ -51,7 +51,7 @@
             />
           </span>
           <span
-            class="flex flex-1 min-w-0 py-2 pr-2 transition pointer-events-none group-hover:text-secondaryDark"
+            class="pointer-events-none flex min-w-0 flex-1 py-2 pr-2 transition group-hover:text-secondaryDark"
           >
             <span class="truncate" :class="{ 'text-accent': isSelected }">
               {{ collectionName }}
@@ -62,7 +62,7 @@
           <HoppButtonSecondary
             v-tippy="{ theme: 'tooltip' }"
             :icon="IconFilePlus"
-            :title="t('request.new')"
+            :title="t('request.add')"
             class="hidden group-hover:inline-flex"
             @click="emit('add-request')"
           />
@@ -72,6 +72,13 @@
             :title="t('folder.new')"
             class="hidden group-hover:inline-flex"
             @click="emit('add-folder')"
+          />
+          <HoppButtonSecondary
+            v-tippy="{ theme: 'tooltip' }"
+            :icon="IconPlaySquare"
+            :title="t('collection_runner.run_collection')"
+            class="hidden group-hover:inline-flex"
+            @click="emit('run-collection', props.id)"
           />
           <span>
             <tippy
@@ -94,8 +101,11 @@
                   @keyup.r="requestAction?.$el.click()"
                   @keyup.n="folderAction?.$el.click()"
                   @keyup.e="edit?.$el.click()"
+                  @keyup.d="duplicateAction?.$el.click()"
                   @keyup.delete="deleteAction?.$el.click()"
                   @keyup.x="exportAction?.$el.click()"
+                  @keyup.p="propertiesAction?.$el.click()"
+                  @keyup.t="runCollectionAction?.$el.click()"
                   @keyup.escape="hide()"
                 >
                   <HoppSmartItem
@@ -123,6 +133,18 @@
                     "
                   />
                   <HoppSmartItem
+                    ref="runCollectionAction"
+                    :icon="IconPlaySquare"
+                    :label="t('collection_runner.run_collection')"
+                    :shortcut="['T']"
+                    @click="
+                      () => {
+                        emit('run-collection', props.id)
+                        hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
                     ref="edit"
                     :icon="IconEdit"
                     :label="t('action.edit')"
@@ -131,6 +153,19 @@
                       () => {
                         emit('edit-collection')
                         hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
+                    ref="duplicateAction"
+                    :icon="IconCopy"
+                    :label="t('action.duplicate')"
+                    :loading="duplicateCollectionLoading"
+                    :shortcut="['D']"
+                    @click="
+                      () => {
+                        emit('duplicate-collection'),
+                          collectionsType === 'my-collections' ? hide() : null
                       }
                     "
                   />
@@ -155,6 +190,18 @@
                     @click="
                       () => {
                         emit('remove-collection')
+                        hide()
+                      }
+                    "
+                  />
+                  <HoppSmartItem
+                    ref="propertiesAction"
+                    :icon="IconSettings2"
+                    :label="t('action.properties')"
+                    :shortcut="['P']"
+                    @click="
+                      () => {
+                        emit('edit-properties')
                         hide()
                       }
                     "
@@ -184,98 +231,75 @@
 </template>
 
 <script setup lang="ts">
-import IconCheckCircle from "~icons/lucide/check-circle"
-import IconFolderPlus from "~icons/lucide/folder-plus"
-import IconFilePlus from "~icons/lucide/file-plus"
-import IconMoreVertical from "~icons/lucide/more-vertical"
-import IconDownload from "~icons/lucide/download"
-import IconTrash2 from "~icons/lucide/trash-2"
-import IconEdit from "~icons/lucide/edit"
-import IconFolder from "~icons/lucide/folder"
-import IconFolderOpen from "~icons/lucide/folder-open"
-import { PropType, ref, computed, watch } from "vue"
-import { HoppCollection, HoppRESTRequest } from "@hoppscotch/data"
 import { useI18n } from "@composables/i18n"
+import { HoppCollection } from "@hoppscotch/data"
+import { computed, ref, watch } from "vue"
 import { TippyComponent } from "vue-tippy"
+import { useReadonlyStream } from "~/composables/stream"
 import { TeamCollection } from "~/helpers/teams/TeamCollection"
 import {
   changeCurrentReorderStatus,
   currentReorderingStatus$,
 } from "~/newstore/reordering"
-import { useReadonlyStream } from "~/composables/stream"
+import IconCheckCircle from "~icons/lucide/check-circle"
+import IconCopy from "~icons/lucide/copy"
+import IconDownload from "~icons/lucide/download"
+import IconEdit from "~icons/lucide/edit"
+import IconFilePlus from "~icons/lucide/file-plus"
+import IconFolder from "~icons/lucide/folder"
+import IconFolderOpen from "~icons/lucide/folder-open"
+import IconFolderPlus from "~icons/lucide/folder-plus"
+import IconMoreVertical from "~icons/lucide/more-vertical"
+import IconPlaySquare from "~icons/lucide/play-square"
+import IconSettings2 from "~icons/lucide/settings-2"
+import IconTrash2 from "~icons/lucide/trash-2"
 
 type CollectionType = "my-collections" | "team-collections"
 type FolderType = "collection" | "folder"
 
 const t = useI18n()
 
-const props = defineProps({
-  id: {
-    type: String,
-    default: "",
-    required: true,
-  },
-  parentID: {
-    type: String as PropType<string | null>,
-    default: null,
-    required: false,
-  },
-  data: {
-    type: Object as PropType<HoppCollection<HoppRESTRequest> | TeamCollection>,
-    default: () => ({}),
-    required: true,
-  },
-  collectionsType: {
-    type: String as PropType<CollectionType>,
-    default: "my-collections",
-    required: true,
-  },
-  /**
-   * Collection component can be used for both collections and folders.
-   * folderType is used to determine which one it is.
-   */
-  folderType: {
-    type: String as PropType<FolderType>,
-    default: "collection",
-    required: true,
-  },
-  isOpen: {
-    type: Boolean,
-    default: false,
-    required: true,
-  },
-  isSelected: {
-    type: Boolean as PropType<boolean | null>,
-    default: false,
-    required: false,
-  },
-  exportLoading: {
-    type: Boolean,
-    default: false,
-    required: false,
-  },
-  hasNoTeamAccess: {
-    type: Boolean,
-    default: false,
-    required: false,
-  },
-  collectionMoveLoading: {
-    type: Array as PropType<string[]>,
-    default: () => [],
-    required: false,
-  },
-  isLastItem: {
-    type: Boolean,
-    default: false,
-    required: false,
-  },
-})
+const props = withDefaults(
+  defineProps<{
+    id: string
+    parentID?: string | null
+    data: HoppCollection | TeamCollection
+    /**
+     * Collection component can be used for both collections and folders.
+     * folderType is used to determine which one it is.
+     */
+    collectionsType: CollectionType
+    folderType: FolderType
+    isOpen: boolean
+    isSelected?: boolean | null
+    exportLoading?: boolean
+    hasNoTeamAccess?: boolean
+    collectionMoveLoading?: string[]
+    isLastItem?: boolean
+    duplicateCollectionLoading?: boolean
+  }>(),
+  {
+    id: "",
+    parentID: null,
+    collectionsType: "my-collections",
+    folderType: "collection",
+    isOpen: false,
+    isSelected: false,
+    exportLoading: false,
+    hasNoTeamAccess: false,
+    isLastItem: false,
+    duplicateLoading: false,
+  }
+)
 
 const emit = defineEmits<{
   (event: "toggle-children"): void
   (event: "add-request"): void
   (event: "add-folder"): void
+  (event: "run-collection"): void
   (event: "edit-collection"): void
+  (event: "edit-properties"): void
+  (event: "duplicate-collection"): void
   (event: "export-data"): void
   (event: "remove-collection"): void
   (event: "drop-event", payload: DataTransfer): void
@@ -283,15 +307,19 @@ const emit = defineEmits<{
   (event: "dragging", payload: boolean): void
   (event: "update-collection-order", payload: DataTransfer): void
   (event: "update-last-collection-order", payload: DataTransfer): void
+  (event: "run-collection", collectionID: string): void
 }>()
 
-const tippyActions = ref<TippyComponent | null>(null)
+const tippyActions = ref<HTMLDivElement | null>(null)
 const requestAction = ref<HTMLButtonElement | null>(null)
 const folderAction = ref<HTMLButtonElement | null>(null)
 const edit = ref<HTMLButtonElement | null>(null)
+const duplicateAction = ref<HTMLButtonElement | null>(null)
 const deleteAction = ref<HTMLButtonElement | null>(null)
 const exportAction = ref<HTMLButtonElement | null>(null)
 const options = ref<TippyComponent | null>(null)
+const propertiesAction = ref<HTMLButtonElement | null>(null)
+const runCollectionAction = ref<HTMLButtonElement | null>(null)
 
 const dragging = ref(false)
 const ordering = ref(false)
@@ -321,20 +349,20 @@ const collectionIcon = computed(() => {
   if (props.isSelected) return IconCheckCircle
   else if (!props.isOpen) return IconFolder
   else if (props.isOpen) return IconFolderOpen
-  else return IconFolder
+  return IconFolder
 })
 
 const collectionName = computed(() => {
-  if ((props.data as HoppCollection<HoppRESTRequest>).name)
-    return (props.data as HoppCollection<HoppRESTRequest>).name
-  else return (props.data as TeamCollection).title
+  if ((props.data as HoppCollection).name)
+    return (props.data as HoppCollection).name
+  return (props.data as TeamCollection).title
 })
 
 watch(
-  () => props.exportLoading,
-  (val) => {
-    if (!val) {
-      options.value!.tippy.hide()
+  () => [props.exportLoading, props.duplicateCollectionLoading],
+  ([newExportLoadingVal, newDuplicateCollectionLoadingVal]) => {
+    if (!newExportLoadingVal && !newDuplicateCollectionLoadingVal) {
+      options.value!.tippy?.hide()
     }
   }
 )
@@ -448,11 +476,15 @@ const notSameDestination = computed(() => {
 })
 
 const isCollLoading = computed(() => {
-  if (props.collectionMoveLoading.length > 0 && props.data.id) {
-    return props.collectionMoveLoading.includes(props.data.id)
-  } else {
-    return false
+  const { collectionMoveLoading } = props
+  if (
+    collectionMoveLoading &&
+    collectionMoveLoading.length > 0 &&
+    props.data.id
+  ) {
+    return collectionMoveLoading.includes(props.data.id)
   }
+  return false
 })
 
 const resetDragState = () => {

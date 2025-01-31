@@ -4,30 +4,29 @@
       <div class="flex">
         <HoppButtonPrimary
           :icon="IconUserPlus"
-          label="Add Members"
+          :label="t('teams.add_members')"
           filled
           @click="showInvite = !showInvite"
         />
       </div>
 
       <div class="border rounded border-divider my-8">
-        <div
+        <HoppSmartPlaceholder
           v-if="team?.teamMembers?.length === 0"
-          class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+          :text="t('teams.no_members')"
         >
-          <span class="pb-4 text-center">
-            No members in this team. Add members to this team to collaborate
-          </span>
-          <HoppButtonSecondary
-            :icon="IconUserPlus"
-            label="Add Members"
-            @click="
-              () => {
-                showInvite = !showInvite;
-              }
-            "
-          />
-        </div>
+          <template #body>
+            <HoppButtonSecondary
+              :icon="IconUserPlus"
+              :label="t('teams.add_members')"
+              @click="
+                () => {
+                  showInvite = !showInvite;
+                }
+              "
+            />
+          </template>
+        </HoppSmartPlaceholder>
         <div v-else class="divide-y divide-dividerLight">
           <div
             v-for="(member, index) in membersList"
@@ -36,7 +35,7 @@
           >
             <input
               class="flex flex-1 px-4 py-3 bg-transparent"
-              placeholder="Email"
+              :placeholder="t('teams.email_title')"
               :name="'param' + index"
               :value="member.email"
               readonly
@@ -51,7 +50,7 @@
                 <span class="relative">
                   <input
                     class="flex flex-1 px-4 py-3 bg-transparent cursor-pointer"
-                    placeholder="Permissions"
+                    :placeholder="t('teams.permissions')"
                     :name="'value' + index"
                     :value="member.role"
                     readonly
@@ -70,7 +69,7 @@
                     @keyup.escape="hide()"
                   >
                     <HoppSmartItem
-                      label="OWNER"
+                      :label="t('teams.owner')"
                       :icon="
                         member.role === 'OWNER' ? IconCircleDot : IconCircle
                       "
@@ -83,7 +82,7 @@
                       "
                     />
                     <HoppSmartItem
-                      label="EDITOR"
+                      :label="t('teams.editor')"
                       :icon="
                         member.role === 'EDITOR' ? IconCircleDot : IconCircle
                       "
@@ -99,7 +98,7 @@
                       "
                     />
                     <HoppSmartItem
-                      label="VIEWER"
+                      :label="t('teams.viewer')"
                       :icon="
                         member.role === 'VIEWER' ? IconCircleDot : IconCircle
                       "
@@ -122,7 +121,7 @@
               <HoppButtonSecondary
                 id="member"
                 v-tippy="{ theme: 'tooltip' }"
-                title="Remove"
+                :title="t('teams.remove')"
                 :icon="IconUserMinus"
                 color="red"
                 :loading="isLoadingIndex === index"
@@ -132,17 +131,23 @@
           </div>
         </div>
       </div>
-      <div v-if="!fetching && !team" class="flex flex-col items-center">
+      <div v-if="!team" class="flex flex-col items-center">
         <icon-lucide-help-circle class="mb-4 svg-icons" />
-        Something went wrong. Please try again later.
+        {{ t('teams.error') }}
       </div>
     </div>
 
     <div class="flex">
-      <HoppButtonPrimary label="Save" outline @click="saveUpdatedTeam" />
+      <HoppButtonPrimary
+        v-if="areRolesUpdated"
+        :label="t('teams.save_changes')"
+        outline
+        @click="saveUpdatedTeam"
+      />
     </div>
     <TeamsInvite
       :show="showInvite"
+      :team="team"
       :editingTeamID="route.params.id.toString()"
       @member="updateMembers"
       @hide-modal="
@@ -155,99 +160,102 @@
 </template>
 
 <script setup lang="ts">
-import IconCircleDot from '~icons/lucide/circle-dot';
-import IconCircle from '~icons/lucide/circle';
-import IconUserPlus from '~icons/lucide/user-plus';
-import IconUserMinus from '~icons/lucide/user-minus';
-import IconChevronDown from '~icons/lucide/chevron-down';
-import { useClientHandle, useMutation } from '@urql/vue';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useMutation } from '@urql/vue';
+import { useVModel } from '@vueuse/core';
+import { cloneDeep, isEqual } from 'lodash-es';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { useToast } from '../../composables/toast';
+import { useI18n } from '~/composables/i18n';
+import { useToast } from '~/composables/toast';
+import { useClientHandler } from '~/composables/useClientHandler';
+import { getCompiledErrorMessage } from '~/helpers/errors';
+import IconChevronDown from '~icons/lucide/chevron-down';
+import IconCircle from '~icons/lucide/circle';
+import IconCircleDot from '~icons/lucide/circle-dot';
+import IconUserMinus from '~icons/lucide/user-minus';
+import IconUserPlus from '~icons/lucide/user-plus';
 import {
   ChangeUserRoleInTeamByAdminDocument,
-  TeamInfoDocument,
-  TeamMemberRole,
   RemoveUserFromTeamByAdminDocument,
+  TeamInfoDocument,
   TeamInfoQuery,
+  TeamMemberRole,
 } from '../../helpers/backend/graphql';
-import { HoppButtonPrimary, HoppButtonSecondary } from '@hoppscotch/ui';
 
+const t = useI18n();
 const toast = useToast();
+const route = useRoute();
+
+const props = defineProps<{
+  team: TeamInfoQuery['infra']['teamInfo'];
+}>();
 
 const emit = defineEmits<{
-  (e: 'update-team'): void;
+  (event: 'update:team', team: TeamInfoQuery['infra']['teamInfo']): void;
 }>();
+
+const teamDetails = useVModel(props, 'team', emit);
 
 // Used to Invoke the Invite Members Modal
 const showInvite = ref(false);
 
-// Get Team Details
-const team = ref<TeamInfoQuery['admin']['teamInfo'] | undefined>();
-const fetching = ref(true);
-const route = useRoute();
-const { client } = useClientHandle();
-
-const getTeamInfo = async () => {
-  fetching.value = true;
-  const result = await client
-    .query(TeamInfoDocument, { teamID: route.params.id.toString() })
-    .toPromise();
-
-  if (result.error) {
-    return toast.error('Unable to Load Team Info..');
+const { fetchData: getTeamInfo, data: teamInfo } = useClientHandler(
+  TeamInfoDocument,
+  {
+    teamID: route.params.id.toString(),
   }
-  if (result.data?.admin.teamInfo) {
-    team.value = result.data.admin.teamInfo;
-  }
-  fetching.value = false;
-};
+);
 
-onMounted(async () => await getTeamInfo());
-onUnmounted(() => emit('update-team'));
+onMounted(async () => {
+  await getTeamInfo();
+});
+
+const team = computed(() => teamInfo.value?.infra.teamInfo);
 
 // Update members tab after a change in the members list or member roles
-const updateMembers = () => {
-  getTeamInfo();
-  emit('update-team');
+const updateMembers = async () => {
+  if (!team.value) return;
+  await getTeamInfo();
+  teamDetails.value = team.value;
 };
 
 // Template refs
 const tippyActions = ref<any | null>(null);
 
-const roleUpdates = ref<
+// Roles of the members in the team
+const currentMemberRoles = ref<
   {
     userID: string;
     role: TeamMemberRole;
   }[]
 >([]);
 
-watch(
-  () => team.value,
-  (teamDetails) => {
-    const members = teamDetails?.teamMembers ?? [];
+// Roles of the members in the team after the updates but before saving
+const updatedMemberRoles = ref<
+  {
+    userID: string;
+    role: TeamMemberRole;
+  }[]
+>(cloneDeep(currentMemberRoles.value));
 
-    // Remove deleted members
-    roleUpdates.value = roleUpdates.value.filter(
-      (update) =>
-        members.findIndex(
-          (y: { user: { uid: string } }) => y.user.uid === update.userID
-        ) !== -1
-    );
-  }
+// Check if the roles of the members have been updated
+const areRolesUpdated = computed(() =>
+  currentMemberRoles.value && updatedMemberRoles.value
+    ? !isEqual(currentMemberRoles.value, updatedMemberRoles.value)
+    : false
 );
 
 // Update the role of the member selected in the UI
 const updateMemberRole = (userID: string, role: TeamMemberRole) => {
-  const updateIndex = roleUpdates.value.findIndex(
+  const updateIndex = updatedMemberRoles.value.findIndex(
     (item) => item.userID === userID
   );
   if (updateIndex !== -1) {
     // Role Update exists
-    roleUpdates.value[updateIndex].role = role;
+    updatedMemberRoles.value[updateIndex].role = role;
   } else {
     // Role Update does not exist
-    roleUpdates.value.push({
+    updatedMemberRoles.value.push({
       userID,
       role,
     });
@@ -258,7 +266,7 @@ const updateMemberRole = (userID: string, role: TeamMemberRole) => {
 const membersList = computed(() => {
   if (!team.value) return [];
   const members = (team.value.teamMembers ?? []).map((member) => {
-    const updatedRole = roleUpdates.value.find(
+    const updatedRole = updatedMemberRoles.value.find(
       (update) => update.userID === member.user.uid
     );
 
@@ -293,19 +301,31 @@ const isLoading = ref(false);
 
 const saveUpdatedTeam = async () => {
   isLoading.value = true;
-  roleUpdates.value.forEach(async (update) => {
+
+  const isOwnerPresent = membersList.value.some(
+    (member) => member.role === TeamMemberRole.Owner
+  );
+
+  if (!isOwnerPresent) {
+    toast.error(t('state.owner_not_present'));
+    isLoading.value = false;
+    return;
+  }
+
+  updatedMemberRoles.value.forEach(async (update) => {
     if (!team.value) return;
+
     const updateMemberRoleResult = await changeUserRoleInTeam(
       update.userID,
       team.value.id,
       update.role
     );
     if (updateMemberRoleResult.error) {
-      toast.error('Role updation has failed!!');
-      roleUpdates.value = [];
+      toast.error(t('state.role_update_failed'));
     } else {
-      toast.success('Roles updated successfully!!');
-      roleUpdates.value = [];
+      toast.success(t('state.role_update_success'));
+      currentMemberRoles.value = updatedMemberRoles.value;
+      updatedMemberRoles.value = cloneDeep(currentMemberRoles.value);
     }
     isLoading.value = false;
   });
@@ -334,14 +354,20 @@ const removeExistingTeamMember = async (userID: string, index: number) => {
     team.value.id
   )();
   if (removeTeamMemberResult.error) {
-    toast.error(`Member couldn't be removed!!`);
+    const compiledErrorMessage = getCompiledErrorMessage(
+      removeTeamMemberResult.error.message
+    );
+
+    compiledErrorMessage
+      ? toast.error(t(compiledErrorMessage))
+      : toast.error(t('state.remove_member_failure'));
   } else {
     team.value.teamMembers = team.value.teamMembers?.filter(
       (member: any) => member.user.uid !== userID
     );
-    toast.success('Member removed successfully!!');
+    teamDetails.value = team.value;
+    toast.success(t('state.remove_member_success'));
   }
   isLoadingIndex.value = null;
-  emit('update-team');
 };
 </script>

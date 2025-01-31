@@ -1,11 +1,13 @@
 import { GraphQLSchemaHost } from '@nestjs/graphql';
 import {
   ApolloServerPlugin,
+  BaseContext,
   GraphQLRequestListener,
-} from 'apollo-server-plugin-base';
+} from '@apollo/server';
 import { Plugin } from '@nestjs/apollo';
 import { GraphQLError } from 'graphql';
 import {
+  ComplexityEstimatorArgs,
   fieldExtensionsEstimator,
   getComplexity,
   simpleEstimator,
@@ -17,7 +19,7 @@ const COMPLEXITY_LIMIT = 50;
 export class GQLComplexityPlugin implements ApolloServerPlugin {
   constructor(private gqlSchemaHost: GraphQLSchemaHost) {}
 
-  async requestDidStart(): Promise<GraphQLRequestListener> {
+  async requestDidStart(): Promise<GraphQLRequestListener<BaseContext>> {
     const { schema } = this.gqlSchemaHost;
 
     return {
@@ -28,6 +30,14 @@ export class GQLComplexityPlugin implements ApolloServerPlugin {
           query: document,
           variables: request.variables,
           estimators: [
+            // Custom estimator for introspection fields
+            (args: ComplexityEstimatorArgs) => {
+              const fieldName = args.field.name;
+              if (fieldName.startsWith('__')) {
+                return 0; // Return 0 complexity for introspection fields
+              }
+              return;
+            },
             fieldExtensionsEstimator(),
             simpleEstimator({ defaultComplexity: 1 }),
           ],

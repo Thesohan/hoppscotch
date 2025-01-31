@@ -1,93 +1,90 @@
 <template>
-  <div>
-    <div class="field-title" :class="{ 'field-highlighted': isHighlighted }">
-      {{ fieldName }}
-      <span v-if="fieldArgs.length > 0">
-        (
-        <span v-for="(field, index) in fieldArgs" :key="`field-${index}`">
-          {{ field.name }}:
-          <GraphqlTypeLink
-            :gql-type="field.type"
-            :jump-type-callback="jumpTypeCallback"
-          />
-          <span v-if="index !== fieldArgs.length - 1">, </span>
-        </span>
-        ) </span
-      >:
-      <GraphqlTypeLink
-        :gql-type="gqlField.type"
-        :jump-type-callback="jumpTypeCallback"
-      />
-    </div>
-    <div
-      v-if="gqlField.description"
-      class="py-2 text-secondaryLight field-desc"
-    >
-      {{ gqlField.description }}
-    </div>
-    <div
-      v-if="gqlField.isDeprecated"
-      class="inline-block px-2 py-1 my-1 text-black bg-yellow-200 rounded field-deprecated"
-    >
-      {{ t("state.deprecated") }}
-    </div>
-    <div v-if="fieldArgs.length > 0">
-      <h5 class="my-2">Arguments:</h5>
-      <div class="pl-4 border-l-2 border-divider">
-        <div v-for="(field, index) in fieldArgs" :key="`field-${index}`">
-          <span>
-            {{ field.name }}:
-            <GraphqlTypeLink
-              :gql-type="field.type"
-              :jump-type-callback="jumpTypeCallback"
-            />
-          </span>
-          <div
-            v-if="field.description"
-            class="py-2 text-secondaryLight field-desc"
-          >
-            {{ field.description }}
-          </div>
-        </div>
+  <div class="hopp-doc-explorer-item" @click="handleClick">
+    <div class="flex">
+      <div
+        :class="{
+          '!line-through': field.deprecationReason,
+        }"
+      >
+        <GraphqlFieldLink
+          :field="field"
+          :show-add-field="showAddField"
+          :is-added="isFieldInOperation(field)"
+          @add-field="insertQuery"
+        />
+        <template v-if="args.length > 0">
+          (<span>
+            <template v-for="arg in args" :key="arg.name">
+              <div
+                v-if="args.length > 1"
+                class="hopp-doc-explorer-argument-multiple"
+              >
+                <GraphqlArgument :arg="arg" inline />
+              </div>
+              <GraphqlArgument v-else :arg="arg" inline />
+            </template> </span
+          >)</template
+        >:
+        <GraphqlTypeLink :type="field.type" />
+        <GraphqlDefaultValue :field="field" />
       </div>
+
+      <span
+        v-if="field.deprecationReason"
+        v-tippy="{ theme: 'tooltip' }"
+        class="hopp-doc-explorer-deprecated inline ml-auto text-red-500"
+        :title="field.deprecationReason"
+      >
+        <icon-lucide-triangle-alert />
+      </span>
     </div>
+
+    <AppMarkdown
+      v-if="field.description"
+      type="description"
+      class="hidden"
+      :only-show-first-child="true"
+    >
+      {{ field.description }}
+    </AppMarkdown>
   </div>
 </template>
 
-<script>
-// TypeScript + Script Setup this :)
-import { defineComponent } from "vue"
-import { useI18n } from "@composables/i18n"
+<script setup lang="ts">
+import { computed } from "vue"
+import { ExplorerFieldDef, useExplorer } from "~/helpers/graphql/explorer"
+import { useQuery } from "~/helpers/graphql/query"
 
-export default defineComponent({
-  props: {
-    gqlField: { type: Object, default: () => ({}) },
-    jumpTypeCallback: { type: Function, default: () => ({}) },
-    isHighlighted: { type: Boolean, default: false },
-  },
-  setup() {
-    return {
-      t: useI18n(),
-    }
-  },
-  computed: {
-    fieldName() {
-      return this.gqlField.name
-    },
+const props = withDefaults(
+  defineProps<{
+    field: ExplorerFieldDef
+    showAddField: boolean
+  }>(),
+  {
+    showAddField: true,
+  }
+)
 
-    fieldArgs() {
-      return this.gqlField.args || []
-    },
-  },
-})
-</script>
+const { push } = useExplorer()
+const { handleAddField, isFieldInOperation } = useQuery()
 
-<style lang="scss" scoped>
-.field-highlighted {
-  @apply border-accent border-b-2;
+const handleClick = () => {
+  push({ name: props.field.name, def: props.field })
 }
 
-.field-title {
-  @apply select-text;
+const insertQuery = () => {
+  handleAddField(props.field)
+}
+
+const args = computed(() =>
+  "args" in props.field
+    ? props.field.args.filter((arg) => !arg.deprecationReason)
+    : []
+)
+</script>
+
+<style scoped lang="scss">
+.hopp-doc-explorer-item {
+  @apply cursor-pointer py-1 px-2 hover:bg-primaryLight;
 }
 </style>
